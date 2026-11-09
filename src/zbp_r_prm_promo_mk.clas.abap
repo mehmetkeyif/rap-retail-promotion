@@ -1,0 +1,5 @@
+CLASS zbp_r_prm_promo_mk DEFINITION PUBLIC ABSTRACT FINAL FOR BEHAVIOR OF zr_prm_promo_mk.
+ENDCLASS.
+
+CLASS zbp_r_prm_promo_mk IMPLEMENTATION.
+ENDCLASS.
