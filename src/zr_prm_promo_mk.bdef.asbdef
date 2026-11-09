@@ -1,66 +1,64 @@
 // ============================================================================
-// DAVRANIS TANIMI (Behavior Definition) - Kampanya is nesnesi
-// CDS gorunumleri "veri neye benziyor" sorusunu cevaplar.
-// Bu dosya ise "bu veriyle ne yapilabilir" sorusunu cevaplar:
-// olusturma, degistirme, silme, kilitleme, yetki ve ileride kurallar.
+// DAVRANIS TANIMI - Kampanya is nesnesi (TASLAK DESTEKLI)
+//
+// with draft : Kullanici Edit'e bastiginda asil kayit degil, onun bir kopyasi
+//              (taslak) duzenlenir. Save denince taslak asil kayda aktarilir.
+//              Yarida birakilirsa taslak saklanir, sonra devam edilebilir.
 // ============================================================================
-
-// managed  : Kaydetme, okuma ve kilitleme gibi standart isleri RAP cercevesi
-//            kendisi yapar. Biz yalnizca is kurallarini (dogrulama, hesaplama,
-//            aksiyon) yazariz.
-// implementation in class ... unique : Is kurallarinin kodu bu sinifta
-//            yazilacak. "unique" = her kural tek bir yerde uygulanir.
 managed implementation in class zbp_r_prm_promo_mk unique;
-
-// strict ( 2 ) : Sozdizimi kontrolunu en siki seviyede yapar. Eski ve
-//                onerilmeyen kullanimlara izin vermez. Yeni projelerde standart.
 strict ( 2 );
+with draft;
 
 // ----------------------------------------------------------------------------
-// 1) KOK VARLIK: Kampanya basligi
-//    "alias Promotion" = kodun icinde bu varliga kisa adla erisecegiz.
+// KOK VARLIK: Kampanya basligi
+// Asagidaki baslik satirlarinin anlami:
+//  persistent table : Asil verinin yazildigi tablo
+//  draft table      : Taslak kopyalarin tutuldugu tablo (Eclipse'e
+//                     olusturtacagiz)
+//  etag master      : Bu kaydin son degisiklik zamani. Iki kisinin ayni
+//                     kaydi ayni anda ezmesini engeller.
+//  lock master      : Kilitleme bu seviyede yapilir
+//  total etag       : Tum is nesnesinin (baslik + kalemler) son degisiklik
+//                     zamani. Taslaktan asil kayda aktarirken "bu arada
+//                     baskasi degistirdi mi?" kontrolu icin. Taslakta zorunlu.
+//  authorization master ( global ) : Genel yetki kontrolu bu seviyede
 // ----------------------------------------------------------------------------
 define behavior for ZR_PRM_PROMO_MK alias Promotion
-
-// Veriler bu tabloya yazilir. Managed senaryoda INSERT/UPDATE/DELETE
-// komutlarini RAP bizim yerimize calistirir.
 persistent table zprm_promo_mk
-
-// lock master : Kilitleme bu seviyede yapilir. Bir kullanici kampanyayi
-// duzenlerken baskasi ayni kampanyayi degistiremez.
-lock master
-
-// authorization master ( global ) : Yetki kontrolu bu seviyede yapilir.
-// "global" = kayda bakmadan genel yetki ("bu kullanici kampanya
-// olusturabilir mi?"). Kontrol kodu davranis sinifinda olacak.
-authorization master ( global )
-
-// etag master : Iyimser kilit. Kullanici ekranda kaydi actiginda bu alanin
-// degeri saklanir; kaydederken deger degismisse (biri arada degistirmis)
-// islem reddedilir. Boylece kimse digerinin degisikligini ezmez.
+draft table zprm_promo_d_mk
 etag master LocalLastChangedAt
+lock master total etag LastChangedAt
+authorization master ( global )
 {
-  // Izin verilen standart islemler
-  create;   // Yeni kampanya olusturma
-  update;   // Kampanya degistirme
-  delete;   // Kampanya silme (kalemleri de beraber silinir, composition)
+  // Standart islemler
+  create;
+  update;
+  delete;
 
-  // Kampanya uzerinden yeni kalem eklenebilsin.
-  // Kalemler tek basina degil, her zaman bir kampanyanin icinde olusturulur.
-  association _Item { create; }
+  // Kalem ekleme. "with draft" = kampanya taslaktayken eklenen kalem de
+  // taslak olarak eklenir.
+  association _Item { create; with draft; }
 
-  // UUID anahtari sistem tarafindan otomatik uretilir (managed numbering),
-  // kullanici bu alani goremez/degistiremez (readonly).
+  // UUID otomatik uretilir; yonetim alanlari RAP tarafindan doldurulur.
   field ( numbering : managed, readonly ) PromoUUID;
-
-  // Kim, ne zaman olusturdu/degistirdi bilgileri: RAP bunlari @Semantics
-  // anotasyonlarina bakarak otomatik doldurur. Kullanici degistiremez.
   field ( readonly ) LocalCreatedBy, LocalCreatedAt,
                      LocalLastChangedBy, LocalLastChangedAt, LastChangedAt;
 
-  // CDS'teki alan adlari (CamelCase) ile tablodaki alan adlari (snake_case)
-  // farkli oldugu icin hangi alanin hangisine yazilacagini soyluyoruz.
-  // Solda CDS alani, sagda tablo alani.
+  // Taslak yasam dongusu islemleri:
+  //  Edit     : Mevcut kayittan taslak olustur (Edit butonu)
+  //  Activate : Taslagi asil kayda aktar (Save butonu)
+  //             "optimized" = daha az veritabani erisimiyle calisan surum
+  //  Discard  : Taslagi at, degisikliklerden vazgec
+  //  Resume   : Yarim kalmis taslaga geri don
+  //  Prepare  : Kaydetmeden hemen once calisan kontrol noktasi. Ileride
+  //             yazacagimiz dogrulamalar burada tetiklenecek.
+  draft action Edit;
+  draft action Activate optimized;
+  draft action Discard;
+  draft action Resume;
+  draft determine action Prepare;
+
+  // CDS alani = tablo alani eslestirmesi
   mapping for zprm_promo_mk
   {
     PromoUUID          = promo_uuid;
@@ -80,38 +78,27 @@ etag master LocalLastChangedAt
 }
 
 // ----------------------------------------------------------------------------
-// 2) ALT VARLIK: Kampanya kalemi
+// ALT VARLIK: Kampanya kalemi
+//  draft table               : Kalemlerin taslak tablosu
+//  lock dependent by _Promo  : Kalem degisince bagli kampanya kilitlenir
+//  authorization dependent   : Yetki kampanyadan devralinir
 // ----------------------------------------------------------------------------
 define behavior for ZR_PRM_PITEM_MK alias Item
-
 persistent table zprm_pitem_mk
-
-// lock dependent by _Promo : Kalemin kendi kilidi yok. Bir kalem
-// degistirildiginde bagli oldugu kampanya kilitlenir. Boylece ayni
-// kampanyanin farkli kalemlerini iki kisi ayni anda degistiremez.
-lock dependent by _Promo
-
-// Yetki de kampanyadan devralinir: kampanyayi degistirebilen,
-// kalemlerini de degistirebilir.
-authorization dependent by _Promo
-
-// Kalemin kendi degisiklik zaman damgasi var; ayni iyimser kilit mantigi.
+draft table zprm_pitem_d_mk
 etag master LocalLastChangedAt
+lock dependent by _Promo
+authorization dependent by _Promo
 {
-  // Kalem burada yalnizca degistirilip silinebilir.
-  // Olusturma yukarida kampanya uzerinden (_Item { create; }) yapilir.
   update;
   delete;
 
-  // Kalemden bagli oldugu kampanyaya gecis (okuma icin gerekli).
-  association _Promo;
+  // Kalemden kampanyaya gecis, taslak farkinda
+  association _Promo { with draft; }
 
-  // Kalem anahtari otomatik uretilir; ust kayit baglantisi (ParentUUID)
-  // RAP tarafindan doldurulur, kullanici degistiremez.
   field ( numbering : managed, readonly ) ItemUUID;
   field ( readonly ) ParentUUID, LocalLastChangedAt;
 
-  // CDS alani = tablo alani eslestirmesi
   mapping for zprm_pitem_mk
   {
     ItemUUID           = item_uuid;

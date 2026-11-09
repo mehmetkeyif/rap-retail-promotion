@@ -1,27 +1,32 @@
 // ============================================================================
-// PROJEKSIYON DAVRANIS TANIMI
-// Cekirdekteki (ZR_) islemlerden hangilerinin bu uygulamada kullanilacagini
-// secer. Burada yeni kural yazilmaz; sadece "use" ile mevcutlar disari acilir.
+// PROJEKSIYON DAVRANIS TANIMI (TASLAK DESTEKLI)
+// Cekirdekte (ZR_) taslak destegini actik. Burada da bu destegin Fiori
+// uygulamasinda kullanilacagini soyluyoruz. Bunu yazmazsak cekirdek
+// taslakli olsa bile uygulama Edit/Save butonlarini gostermez.
 // ============================================================================
-
-// projection : Bu dosya kendi basina is mantigi icermez, alttakini kullanir.
 projection;
 strict ( 2 );
 
-define behavior for ZC_PRM_PROMO_MK alias Promotion
+// Cekirdekteki taslak destegini bu uygulamada kullan.
+use draft;
 
-// use etag : Alttaki iyimser kilit (etag) kontrolu bu uygulamada da gecerli.
+define behavior for ZC_PRM_PROMO_MK alias Promotion
 use etag
 {
-  // Cekirdekte tanimli islemleri bu uygulamada kullanima ac.
-  // Ornegin "use delete" satirini silersek, uygulamada Sil butonu
-  // gorunmez; ama cekirdekte silme hala vardir (baska uygulamalar icin).
   use create;
   use update;
   use delete;
 
-  // Kampanya ekranindan yeni kalem eklenebilsin.
-  use association _Item { create; }
+  // Taslak islemlerini Fiori'ye ac. Fiori bunlari gorunce
+  // Edit, Save ve Discard butonlarini kendisi ekler.
+  use action Edit;
+  use action Activate;
+  use action Discard;
+  use action Resume;
+  use action Prepare;
+
+  // Kampanya taslaktayken kalem ekleme de taslak icinde calissin.
+  use association _Item { create; with draft; }
 }
 
 define behavior for ZC_PRM_PITEM_MK alias Item
@@ -30,6 +35,6 @@ use etag
   use update;
   use delete;
 
-  // Kalemden kampanyaya gecis (okuma icin).
-  use association _Promo;
+  // Kalemden kampanyaya gecis taslak farkinda olsun.
+  use association _Promo { with draft; }
 }
