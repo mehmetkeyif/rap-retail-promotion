@@ -1,0 +1,35 @@
+// ============================================================================
+// PROJEKSIYON DAVRANIS TANIMI
+// Cekirdekteki (ZR_) islemlerden hangilerinin bu uygulamada kullanilacagini
+// secer. Burada yeni kural yazilmaz; sadece "use" ile mevcutlar disari acilir.
+// ============================================================================
+
+// projection : Bu dosya kendi basina is mantigi icermez, alttakini kullanir.
+projection;
+strict ( 2 );
+
+define behavior for ZC_PRM_PROMO_MK alias Promotion
+
+// use etag : Alttaki iyimser kilit (etag) kontrolu bu uygulamada da gecerli.
+use etag
+{
+  // Cekirdekte tanimli islemleri bu uygulamada kullanima ac.
+  // Ornegin "use delete" satirini silersek, uygulamada Sil butonu
+  // gorunmez; ama cekirdekte silme hala vardir (baska uygulamalar icin).
+  use create;
+  use update;
+  use delete;
+
+  // Kampanya ekranindan yeni kalem eklenebilsin.
+  use association _Item { create; }
+}
+
+define behavior for ZC_PRM_PITEM_MK alias Item
+use etag
+{
+  use update;
+  use delete;
+
+  // Kalemden kampanyaya gecis (okuma icin).
+  use association _Promo;
+}
