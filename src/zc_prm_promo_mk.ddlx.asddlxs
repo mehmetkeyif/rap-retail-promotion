@@ -1,0 +1,100 @@
+// ============================================================================
+// METADATA EXTENSION - Kampanya ekran tasarimi
+// Veri modeline dokunmadan "Fiori ekraninda ne nerede gorunsun" sorusunu
+// cevaplar. Fiori Elements bu anotasyonlari okuyup ekrani KENDISI cizer;
+// tek satir HTML/JavaScript yazmayiz.
+// ============================================================================
+
+// #CORE : Anotasyon katmani. Musteri/partner ayni dosyanin ustune kendi
+// katmanini yazabilir; en temel katman CORE'dur.
+@Metadata.layer: #CORE
+
+// Nesne sayfasinin (detay ekrani) basligi:
+// tekil/cogul ad, basliktaki buyuk yazi (PromoID) ve altindaki aciklama.
+@UI: {
+  headerInfo: {
+    typeName:       'Promotion',
+    typeNamePlural: 'Promotions',
+    title:       { type: #STANDARD, value: 'PromoID' },
+    description: { type: #STANDARD, value: 'Description' }
+  }
+}
+annotate entity ZC_PRM_PROMO_MK with
+{
+  // --------------------------------------------------------------------------
+  // FACET = Detay ekranindaki bolumler (sekmeler/kutular)
+  // 1) "General" : identification ile isaretli alanlardan olusan form
+  // 2) "Items"   : _Item uzerinden gelen kalemlerin tablosu
+  // --------------------------------------------------------------------------
+  @UI.facet: [
+    { id:       'idGeneral',
+      purpose:  #STANDARD,
+      type:     #IDENTIFICATION_REFERENCE,
+      label:    'General',
+      position: 10 },
+    { id:            'idItems',
+      purpose:       #STANDARD,
+      type:          #LINEITEM_REFERENCE,
+      label:         'Items',
+      position:      20,
+      targetElement: '_Item' } ]
+
+  // Teknik anahtar kullaniciya gosterilmez.
+  @UI.hidden: true
+  PromoUUID;
+
+  // lineItem       : Liste ekranindaki tablo sutunu (position = sira)
+  // identification : Detay ekranindaki "General" formunda bir alan
+  // selectionField : Liste ekraninin ustundeki filtre alani
+  // EndUserText.label : Sutun/alan basligi. Tablo alanlarimiz veri elemani
+  //                     kullanmadigi icin basliklari burada veriyoruz.
+  @UI: { lineItem:       [ { position: 10 } ],
+         identification: [ { position: 10 } ],
+         selectionField: [ { position: 10 } ] }
+  @EndUserText.label: 'Promotion ID'
+  PromoID;
+
+  @UI: { lineItem:       [ { position: 20 } ],
+         identification: [ { position: 20 } ] }
+  @EndUserText.label: 'Description'
+  Description;
+
+  @UI: { lineItem:       [ { position: 30 } ],
+         identification: [ { position: 30 } ],
+         selectionField: [ { position: 20 } ] }
+  @EndUserText.label: 'Type (P/F/B)'
+  PromoType;
+
+  @UI: { lineItem:       [ { position: 40 } ],
+         identification: [ { position: 40 } ] }
+  @EndUserText.label: 'Valid From'
+  ValidFrom;
+
+  @UI: { lineItem:       [ { position: 50 } ],
+         identification: [ { position: 50 } ] }
+  @EndUserText.label: 'Valid To'
+  ValidTo;
+
+  @UI: { lineItem:       [ { position: 60 } ],
+         identification: [ { position: 60 } ],
+         selectionField: [ { position: 30 } ] }
+  @EndUserText.label: 'Status (N/A/X/E)'
+  Status;
+
+  // Para birimi listede degil, sadece detay formunda gorunsun.
+  @UI.identification: [ { position: 70 } ]
+  @EndUserText.label: 'Currency'
+  CurrencyCode;
+
+  // Yonetim alanlari (kim/ne zaman) simdilik gizli.
+  @UI.hidden: true
+  LocalCreatedBy;
+  @UI.hidden: true
+  LocalCreatedAt;
+  @UI.hidden: true
+  LocalLastChangedBy;
+  @UI.hidden: true
+  LocalLastChangedAt;
+  @UI.hidden: true
+  LastChangedAt;
+}

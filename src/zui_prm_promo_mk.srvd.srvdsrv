@@ -1,0 +1,6 @@
+@EndUserText.label: 'Promotion Service'
+define service ZUI_PRM_PROMO_MK {
+  expose ZC_PRM_PROMO_MK   as Promotion;
+  expose ZC_PRM_PITEM_MK   as PromotionItem;
+  expose ZI_PRM_PRODUCT_MK as Product;
+}

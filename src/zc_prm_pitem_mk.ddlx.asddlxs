@@ -1,0 +1,60 @@
+// ============================================================================
+// METADATA EXTENSION - Kampanya kalemi ekran tasarimi
+// Kalemler iki yerde gorunur:
+//  - Kampanya detayindaki "Items" tablosunda (lineItem)
+//  - Bir kaleme tiklandiginda acilan kendi detay ekraninda (identification)
+// ============================================================================
+@Metadata.layer: #CORE
+
+@UI: {
+  headerInfo: {
+    typeName:       'Item',
+    typeNamePlural: 'Items',
+    title: { type: #STANDARD, value: 'ProductID' }
+  }
+}
+annotate entity ZC_PRM_PITEM_MK with
+{
+  // Kalem detay ekraninda tek bir form bolumu
+  @UI.facet: [
+    { id:       'idItem',
+      purpose:  #STANDARD,
+      type:     #IDENTIFICATION_REFERENCE,
+      label:    'Item',
+      position: 10 } ]
+
+  // Teknik anahtarlar gizli
+  @UI.hidden: true
+  ItemUUID;
+  @UI.hidden: true
+  ParentUUID;
+
+  @UI: { lineItem:       [ { position: 10 } ],
+         identification: [ { position: 10 } ] }
+  @EndUserText.label: 'Product'
+  ProductID;
+
+  // Tutar alanlari: Fiori, @Semantics baglantisi sayesinde para birimini
+  // tutarin yanina otomatik yazar (ornek: 89,90 TRY).
+  @UI: { lineItem:       [ { position: 20 } ],
+         identification: [ { position: 20 } ] }
+  @EndUserText.label: 'Regular Price'
+  RegularPrice;
+
+  @UI: { lineItem:       [ { position: 30 } ],
+         identification: [ { position: 30 } ] }
+  @EndUserText.label: 'Promo Price'
+  PromoPrice;
+
+  @UI: { lineItem:       [ { position: 40 } ],
+         identification: [ { position: 40 } ] }
+  @EndUserText.label: 'Discount %'
+  DiscountPct;
+
+  @UI.identification: [ { position: 50 } ]
+  @EndUserText.label: 'Currency'
+  CurrencyCode;
+
+  @UI.hidden: true
+  LocalLastChangedAt;
+}
