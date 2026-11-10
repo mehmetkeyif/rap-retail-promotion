@@ -1,6 +1,5 @@
 // ============================================================================
 // DAVRANIS TANIMI - Kampanya is nesnesi
-// Taslak + belirlemeler + dogrulamalar + aksiyonlar + ozellik kontrolu
 // ============================================================================
 managed implementation in class zbp_r_prm_promo_mk unique;
 strict ( 2 );
@@ -14,14 +13,8 @@ lock master total etag LastChangedAt
 authorization master ( global )
 {
   create;
-
-  // YENI: ( features : instance ) = Bu islemin acik/kapali olmasina her kayit
-  // icin ayri karar verilir. Karari get_instance_features metodu verir.
-  // Ornek: Yayindaki kampanyada Delete butonu pasif olur.
   update ( features : instance );
   delete ( features : instance );
-
-  // YENI: Kalem ekleme de kayda gore acilip kapanir.
   association _Item { create ( features : instance ); with draft; }
 
   field ( numbering : managed, readonly ) PromoUUID;
@@ -34,15 +27,12 @@ authorization master ( global )
   determination setPromoID on save { create; }
   validation validateDates on save { create; field ValidFrom, ValidTo; }
 
-  // YENI: AKSIYONLAR
-  // result [1] $self : Aksiyon bittikten sonra kampanyanin guncel halini
-  //                    geri dondur. Fiori ekrani bununla yeniler.
-  // Approve : N -> A
-  // Publish : A -> X (mağazalara/POS'a yayinla)
+  // YENI: Tarih degisince, kampanyanin tum kalemleri icin cakisma kontrolu
+  validation validateOverlap on save { create; field ValidFrom, ValidTo; }
+
   action ( features : instance ) approve result [1] $self;
   action ( features : instance ) publish result [1] $self;
 
-  // YENI: Edit butonu da kayda gore acilip kapanir.
   draft action ( features : instance ) Edit;
   draft action Activate optimized;
   draft action Discard;
@@ -50,7 +40,11 @@ authorization master ( global )
   draft determine action Prepare
   {
     validation validateDates;
+    // YENI
+    validation validateOverlap;
     validation Item~validateItem;
+    // YENI
+    validation Item~validateItemOverlap;
   }
 
   mapping for zprm_promo_mk
@@ -90,6 +84,9 @@ authorization dependent by _Promo
   determination fillFromProduct on modify { create; field ProductID; }
   determination calculatePromoPrice on modify { field RegularPrice, DiscountPct; }
   validation validateItem on save { create; field ProductID, DiscountPct; }
+
+  // YENI: Urun eklenince/degisince cakisma kontrolu
+  validation validateItemOverlap on save { create; field ProductID; }
 
   side effects
   {

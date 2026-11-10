@@ -1,5 +1,89 @@
 " ======================================================================
-" DAVRANIS ISLEYICI SINIFLARI
+" 0) YARDIMCI SINIF: Cakisma kontrolu
+"
+" Hem baslik hem kalem dogrulamasi ayni mantigi kullanir; kodu iki kez
+" yazmamak icin buraya topladik. Diger siniflardan ONCE tanimlanmali,
+" cunku onlar bunu kullaniyor.
+"
+" Girdi : kontrol edilecek kalemler + bu kalemlerin kampanyalari (tarihler)
+" Cikti : cakisan kalemlerin listesi (kacinci kalem, hangi kampanyayla)
+" ======================================================================
+CLASS lcl_overlap DEFINITION.
+  PUBLIC SECTION.
+
+    " RAP'in turetilmis tiplerine once birer ad veriyoruz.
+    " Metot imzasinda (IMPORTING/RETURNING) bu adlari kullaniyoruz;
+    " turetilmis tip imzada dogrudan yazilamiyor.
+    TYPES tt_items  TYPE TABLE FOR READ RESULT zr_prm_promo_mk\\Item.
+    TYPES tt_promos TYPE TABLE FOR READ RESULT zr_prm_promo_mk\\Promotion.
+
+    " Bir cakisma kaydi: kontrol edilen kalemin sirasi ve cakistigi kampanya
+    TYPES: BEGIN OF ty_conflict,
+             item_index  TYPE i,
+             other_promo TYPE zprm_promo_mk-promo_id,
+           END OF ty_conflict,
+           tt_conflict TYPE STANDARD TABLE OF ty_conflict WITH EMPTY KEY.
+
+    " Statik metot: nesne olusturmadan lcl_overlap=>find( ... ) ile cagrilir
+    CLASS-METHODS find
+      IMPORTING it_items            TYPE tt_items
+                it_promos           TYPE tt_promos
+      RETURNING VALUE(rt_conflicts) TYPE tt_conflict.
+ENDCLASS.
+
+CLASS lcl_overlap IMPLEMENTATION.
+  METHOD find.
+    LOOP AT it_items INTO DATA(item).
+      " sy-tabix : LOOP icinde su anki satirin sira numarasi
+      DATA(lv_index) = sy-tabix.
+
+      " Urun kodu bossa kontrol edecek bir sey yok
+      IF item-ProductID IS INITIAL.
+        CONTINUE.
+      ENDIF.
+
+      " Bu kalemin kampanyasini bul (tarihleri icin).
+      " %is_draft'i de eslestiriyoruz: taslak kalemin taslak kampanyasi.
+      READ TABLE it_promos INTO DATA(promo)
+        WITH KEY PromoUUID = item-ParentUUID
+                 %is_draft = item-%is_draft.
+      IF sy-subrc <> 0 OR promo-ValidFrom IS INITIAL OR promo-ValidTo IS INITIAL.
+        CONTINUE.   " Tarih yoksa validateDates zaten hata verecek
+      ENDIF.
+
+      " Ayni urunu iceren, tarihi cakisan BASKA bir kampanya var mi?
+      "  INNER JOIN : kalem tablosunu baslik tablosuyla birlestir
+      "  h~promo_uuid <> ... : kendi kampanyamizi haric tut
+      "  h~status <> 'E'     : bitmis kampanyalari sayma
+      "  son iki satir       : cakisma formulu
+      "     diger.baslangic <= bizim.bitis VE diger.bitis >= bizim.baslangic
+      " Not: Yalnizca KAYDEDILMIS kampanyalara bakiyoruz. Baska kullanicilarin
+      " henuz kaydetmedigi taslaklar sayilmaz; onlar kaydederken yakalanir.
+      SELECT SINGLE FROM zprm_pitem_mk AS i
+        INNER JOIN zprm_promo_mk AS h
+          ON h~promo_uuid = i~parent_uuid
+        FIELDS h~promo_id
+        WHERE i~product_id  =  @item-ProductID
+          AND h~promo_uuid  <> @item-ParentUUID
+          AND h~status      <> 'E'
+          AND h~valid_from  <= @promo-ValidTo
+          AND h~valid_to    >= @promo-ValidFrom
+        INTO @DATA(lv_other_promo).
+
+      " sy-subrc = 0 : SELECT bir kayit buldu, yani cakisma var
+      IF sy-subrc = 0.
+        APPEND VALUE #( item_index  = lv_index
+                        other_promo = lv_other_promo ) TO rt_conflicts.
+      ENDIF.
+    ENDLOOP.
+    " Not: Dongu icinde SELECT, birkac kalem icin sorun degil. Yuzlerce kalemli
+    " kampanyalarda tek bir toplu sorguya cevirmek gerekir (performans).
+  ENDMETHOD.
+ENDCLASS.
+
+
+" ======================================================================
+" 1) KAMPANYA BASLIGI ISLEYICISI
 " Ortak kavramlar:
 "  keys          : Kuralin calisacagi kayitlarin anahtarlari (RAP verir)
 "  %tky          : Anahtar + taslak mi/asil mi bilgisi
@@ -7,47 +91,33 @@
 "  failed        : "Bu kayitta islem basarisiz" listesi
 "  reported      : Kullaniciya gosterilecek mesajlar
 " ======================================================================
-
-" ----------------------------------------------------------------------
-" 1) KAMPANYA BASLIGI ISLEYICISI
-" ----------------------------------------------------------------------
 CLASS lhc_Promotion DEFINITION INHERITING FROM cl_abap_behavior_handler.
   PRIVATE SECTION.
-
-    " Genel yetki: "Bu kullanici bu islemi yapabilir mi?"
     METHODS get_global_authorizations FOR GLOBAL AUTHORIZATION
       IMPORTING REQUEST requested_authorizations FOR Promotion
       RESULT result.
-
-    " YENI - Ozellik kontrolu: "Bu kayitta bu buton acik mi kapali mi?"
     METHODS get_instance_features FOR INSTANCE FEATURES
       IMPORTING keys REQUEST requested_features FOR Promotion
       RESULT result.
-
     METHODS setDefaults FOR DETERMINE ON MODIFY
       IMPORTING keys FOR Promotion~setDefaults.
-
     METHODS setPromoID FOR DETERMINE ON SAVE
       IMPORTING keys FOR Promotion~setPromoID.
-
     METHODS validateDates FOR VALIDATE ON SAVE
       IMPORTING keys FOR Promotion~validateDates.
-
-    " YENI - Aksiyonlar. RESULT result : Aksiyon sonrasi guncel kayit
+    " Tarih degisince cakisma kontrolu
+    METHODS validateOverlap FOR VALIDATE ON SAVE
+      IMPORTING keys FOR Promotion~validateOverlap.
     METHODS approve FOR MODIFY
       IMPORTING keys FOR ACTION Promotion~approve RESULT result.
-
     METHODS publish FOR MODIFY
       IMPORTING keys FOR ACTION Promotion~publish RESULT result.
-
 ENDCLASS.
 
 CLASS lhc_Promotion IMPLEMENTATION.
 
   METHOD get_global_authorizations.
-    " Deneme projesi: herkese her isleme izin ver.
-    " DIKKAT: Yeni aksiyonlari buraya eklemezsek, dunku Edit butonu gibi
-    " Approve ve Publish butonlari da pasif kalir.
+    " Herkese her isleme izin (deneme projesi)
     IF requested_authorizations-%create = if_abap_behv=>mk-on.
       result-%create = if_abap_behv=>auth-allowed.
     ENDIF.
@@ -60,7 +130,6 @@ CLASS lhc_Promotion IMPLEMENTATION.
     IF requested_authorizations-%action-Edit = if_abap_behv=>mk-on.
       result-%action-Edit = if_abap_behv=>auth-allowed.
     ENDIF.
-    " YENI
     IF requested_authorizations-%action-approve = if_abap_behv=>mk-on.
       result-%action-approve = if_abap_behv=>auth-allowed.
     ENDIF.
@@ -71,30 +140,17 @@ CLASS lhc_Promotion IMPLEMENTATION.
 
 
   METHOD get_instance_features.
-    " Fiori her kampanyayi gosterirken bu metodu cagirir ve butonlari
-    " buradan gelen cevaba gore acar/kapatir.
-    "
-    " Yetki ile farki: Yetki "KIM yapabilir?" sorusunu, ozellik kontrolu
-    " "Bu KAYITTA su an yapilabilir mi?" sorusunu cevaplar.
-
-    " 1) Kampanyalarin durumunu oku.
+    " Duruma gore butonlari ac/kapat
     READ ENTITIES OF zr_prm_promo_mk IN LOCAL MODE
       ENTITY Promotion
         FIELDS ( Status )
         WITH CORRESPONDING #( keys )
       RESULT DATA(promos).
 
-    " 2) Her kampanya icin karar ver.
-    "    fc-o-enabled  : islem/buton acik
-    "    fc-o-disabled : islem/buton kapali (pasif)
-    "    COND #( WHEN ... THEN ... ELSE ... ) : kosula gore deger sec
     result = VALUE #( FOR promo IN promos
       LET locked = xsdbool( promo-Status = 'X' OR promo-Status = 'E' )
       IN
       ( %tky = promo-%tky
-
-        " Yayinda veya bitmis kampanya degistirilemez/silinemez,
-        " Edit acilamaz, kalem eklenemez.
         %update      = COND #( WHEN locked = abap_true
                                THEN if_abap_behv=>fc-o-disabled
                                ELSE if_abap_behv=>fc-o-enabled )
@@ -107,24 +163,17 @@ CLASS lhc_Promotion IMPLEMENTATION.
         %assoc-_Item = COND #( WHEN locked = abap_true
                                THEN if_abap_behv=>fc-o-disabled
                                ELSE if_abap_behv=>fc-o-enabled )
-
-        " Approve yalnizca Yeni (N) kampanyada
         %action-approve = COND #( WHEN promo-Status = 'N'
                                   THEN if_abap_behv=>fc-o-enabled
                                   ELSE if_abap_behv=>fc-o-disabled )
-
-        " Publish yalnizca Onayli (A) kampanyada
         %action-publish = COND #( WHEN promo-Status = 'A'
                                   THEN if_abap_behv=>fc-o-enabled
                                   ELSE if_abap_behv=>fc-o-disabled ) ) ).
-    " LET locked = ... IN : Her satir icin bir kez hesaplanan yardimci
-    " degisken. Ayni kosulu dort kez yazmamak icin.
-    " xsdbool( ... ) : Kosulu dogru/yanlis (abap_true/abap_false) degerine cevirir.
   ENDMETHOD.
 
 
   METHOD setDefaults.
-    " Yeni kampanyaya durum N ve para birimi TRY ver (dunku kod)
+    " Yeni kampanya: durum N, para birimi TRY
     READ ENTITIES OF zr_prm_promo_mk IN LOCAL MODE
       ENTITY Promotion
         FIELDS ( Status CurrencyCode )
@@ -149,7 +198,7 @@ CLASS lhc_Promotion IMPLEMENTATION.
 
 
   METHOD setPromoID.
-    " Kaydederken otomatik kampanya numarasi ver (dunku kod)
+    " Kaydederken otomatik numara: PR00000001, PR00000002 ...
     DATA lv_last   TYPE i.
     DATA lv_numc   TYPE n LENGTH 8.
     DATA lt_update TYPE TABLE FOR UPDATE zr_prm_promo_mk\\Promotion.
@@ -188,7 +237,7 @@ CLASS lhc_Promotion IMPLEMENTATION.
 
 
   METHOD validateDates.
-    " Tarih kontrolu (dunku kod)
+    " Tarihler dolu olmali, bitis >= baslangic
     READ ENTITIES OF zr_prm_promo_mk IN LOCAL MODE
       ENTITY Promotion
         FIELDS ( ValidFrom ValidTo )
@@ -223,13 +272,60 @@ CLASS lhc_Promotion IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD validateOverlap.
+    " Kampanyanin tarihleri degistiginde TUM kalemlerini kontrol et.
+    DATA lt_items TYPE lcl_overlap=>tt_items.
+
+    " 1) Kampanyalari (tarihleriyle) ve kalemlerini oku
+    READ ENTITIES OF zr_prm_promo_mk IN LOCAL MODE
+      ENTITY Promotion
+        FIELDS ( PromoID ValidFrom ValidTo )
+        WITH CORRESPONDING #( keys )
+        RESULT DATA(promos)
+      ENTITY Promotion BY \_Item
+        FIELDS ( ProductID ParentUUID )
+        WITH CORRESPONDING #( keys )
+        RESULT DATA(items_by_promo).
+
+    " 2) "Kampanya uzerinden okunan kalem" tipini yardimci sinifin bekledigi
+    "    "kalem" tipine cevir. Alanlar ayni, tip adi farkli oldugu icin
+    "    CORRESPONDING ile ayni adli alanlari kopyaliyoruz.
+    lt_items = CORRESPONDING #( items_by_promo ).
+
+    " 3) Ortak kontrolu calistir
+    DATA(conflicts) = lcl_overlap=>find( it_items  = lt_items
+                                         it_promos = promos ).
+
+    " 4) Her kampanya icin onceki cakisma mesajini temizle
+    LOOP AT promos INTO DATA(promo).
+      APPEND VALUE #( %tky        = promo-%tky
+                      %state_area = 'VALIDATE_OVERLAP' ) TO reported-promotion.
+    ENDLOOP.
+
+    " 5) Her cakisma icin kampanyaya hata yaz
+    LOOP AT conflicts INTO DATA(conflict).
+      " Cakisan kalemi ve kampanyasini bul
+      DATA(item)       = lt_items[ conflict-item_index ].
+      DATA(item_promo) = promos[ PromoUUID = item-ParentUUID
+                                 %is_draft = item-%is_draft ].
+
+      APPEND VALUE #( %tky = item_promo-%tky ) TO failed-promotion.
+      APPEND VALUE #( %tky        = item_promo-%tky
+                      %state_area = 'VALIDATE_OVERLAP'
+                      %msg        = new_message_with_text(
+                                      severity = if_abap_behv_message=>severity-error
+                                      text     = |Product { item-ProductID } is already in { conflict-other_promo } for overlapping dates| )
+                      %element-ValidFrom = if_abap_behv=>mk-on
+                      %element-ValidTo   = if_abap_behv=>mk-on )
+        TO reported-promotion.
+    ENDLOOP.
+  ENDMETHOD.
+
+
   METHOD approve.
-    " YENI - Kampanyayi onayla: N -> A
-    " Kural: En az bir kalemi olmayan kampanya onaylanamaz.
+    " N -> A. Kalemsiz kampanya onaylanamaz.
     DATA lt_ok TYPE TABLE FOR UPDATE zr_prm_promo_mk\\Promotion.
 
-    " 1) Kampanyalari VE kalemlerini tek komutta oku.
-    "    BY \_Item : Kampanyadan kalemlerine gecis (association ile okuma)
     READ ENTITIES OF zr_prm_promo_mk IN LOCAL MODE
       ENTITY Promotion
         FIELDS ( PromoID Status )
@@ -241,24 +337,17 @@ CLASS lhc_Promotion IMPLEMENTATION.
         RESULT DATA(items).
 
     LOOP AT promos INTO DATA(promo).
-
-      " 2) Bu kampanyaya ait kalem var mi?
-      "    line_exists( ... ) : Tabloda bu kosula uyan satir var mi?
-      "    %is_draft'i de karsilastiriyoruz: taslak kampanyanin taslak
-      "    kalemleri, asil kampanyanin asil kalemleri sayilmali.
       IF NOT line_exists( items[ ParentUUID = promo-PromoUUID
                                  %is_draft  = promo-%is_draft ] ).
-        " Kalem yok: islemi reddet ve kullaniciya soyle.
         APPEND VALUE #( %tky = promo-%tky ) TO failed-promotion.
         APPEND VALUE #( %tky = promo-%tky
                         %msg = new_message_with_text(
                                  severity = if_abap_behv_message=>severity-error
                                  text     = |{ promo-PromoID }: add at least one item before approving| ) )
           TO reported-promotion.
-        CONTINUE.   " Bu kampanyayi atla, siradakine gec
+        CONTINUE.
       ENDIF.
 
-      " 3) Kurala uyuyor: onaylanacaklar listesine ekle ve basari mesaji ver.
       APPEND VALUE #( %tky = promo-%tky Status = 'A' ) TO lt_ok.
       APPEND VALUE #( %tky = promo-%tky
                       %msg = new_message_with_text(
@@ -267,7 +356,6 @@ CLASS lhc_Promotion IMPLEMENTATION.
         TO reported-promotion.
     ENDLOOP.
 
-    " 4) Durumlari guncelle (Status readonly; IN LOCAL MODE sayesinde yazabiliyoruz)
     IF lt_ok IS NOT INITIAL.
       MODIFY ENTITIES OF zr_prm_promo_mk IN LOCAL MODE
         ENTITY Promotion
@@ -275,9 +363,6 @@ CLASS lhc_Promotion IMPLEMENTATION.
           WITH lt_ok.
     ENDIF.
 
-    " 5) Guncel kayitlari Fiori'ye geri dondur (result [1] $self).
-    "    ALL FIELDS : tum alanlari oku
-    "    %param     : aksiyonun dondurdugu veri
     READ ENTITIES OF zr_prm_promo_mk IN LOCAL MODE
       ENTITY Promotion
         ALL FIELDS
@@ -291,11 +376,8 @@ CLASS lhc_Promotion IMPLEMENTATION.
 
 
   METHOD publish.
-    " YENI - Kampanyayi yayinla (magazalara/POS'a gonder): A -> X
-    " Kural: Bitis tarihi gecmis kampanya yayinlanamaz.
+    " A -> X. Bitis tarihi gecmis kampanya yayinlanamaz.
     DATA lt_ok TYPE TABLE FOR UPDATE zr_prm_promo_mk\\Promotion.
-
-    " Bugunun tarihi (ABAP Cloud'da sy-datum yerine onerilen yol)
     DATA(lv_today) = cl_abap_context_info=>get_system_date( ).
 
     READ ENTITIES OF zr_prm_promo_mk IN LOCAL MODE
@@ -305,7 +387,6 @@ CLASS lhc_Promotion IMPLEMENTATION.
       RESULT DATA(promos).
 
     LOOP AT promos INTO DATA(promo).
-
       IF promo-ValidTo < lv_today.
         APPEND VALUE #( %tky = promo-%tky ) TO failed-promotion.
         APPEND VALUE #( %tky = promo-%tky
@@ -322,10 +403,6 @@ CLASS lhc_Promotion IMPLEMENTATION.
                                severity = if_abap_behv_message=>severity-success
                                text     = |{ promo-PromoID } published to stores| ) )
         TO reported-promotion.
-
-      " Gercek projede burada kampanya POS sistemlerine gonderilir
-      " (ornegin bir is olayi / business event yayinlanarak).
-      " Bunu 8. haftada Web API ile ele alacagiz.
     ENDLOOP.
 
     IF lt_ok IS NOT INITIAL.
@@ -349,9 +426,9 @@ CLASS lhc_Promotion IMPLEMENTATION.
 ENDCLASS.
 
 
-" ----------------------------------------------------------------------
-" 2) KAMPANYA KALEMI ISLEYICISI (dunku kodun aynisi)
-" ----------------------------------------------------------------------
+" ======================================================================
+" 2) KAMPANYA KALEMI ISLEYICISI
+" ======================================================================
 CLASS lhc_Item DEFINITION INHERITING FROM cl_abap_behavior_handler.
   PRIVATE SECTION.
     METHODS fillFromProduct FOR DETERMINE ON MODIFY
@@ -360,6 +437,9 @@ CLASS lhc_Item DEFINITION INHERITING FROM cl_abap_behavior_handler.
       IMPORTING keys FOR Item~calculatePromoPrice.
     METHODS validateItem FOR VALIDATE ON SAVE
       IMPORTING keys FOR Item~validateItem.
+    " Urun eklenince/degisince cakisma kontrolu
+    METHODS validateItemOverlap FOR VALIDATE ON SAVE
+      IMPORTING keys FOR Item~validateItemOverlap.
 ENDCLASS.
 
 CLASS lhc_Item IMPLEMENTATION.
@@ -452,6 +532,57 @@ CLASS lhc_Item IMPLEMENTATION.
                         %element-DiscountPct = if_abap_behv=>mk-on )
           TO reported-item.
       ENDIF.
+    ENDLOOP.
+  ENDMETHOD.
+
+
+  METHOD validateItemOverlap.
+    " Kalemde urun eklenince/degisince cakisma kontrolu
+    DATA lt_promos TYPE lcl_overlap=>tt_promos.
+
+    " 1) Kalemleri oku
+    READ ENTITIES OF zr_prm_promo_mk IN LOCAL MODE
+      ENTITY Item
+        FIELDS ( ProductID ParentUUID )
+        WITH CORRESPONDING #( keys )
+      RESULT DATA(items).
+
+    " 2) Kalemlerin kampanyalarini (tarihleriyle) oku.
+    "    LINK : hangi kalem hangi kampanyaya bagli (mesaj yolu icin)
+    READ ENTITIES OF zr_prm_promo_mk IN LOCAL MODE
+      ENTITY Item BY \_Promo
+        FIELDS ( ValidFrom ValidTo )
+        WITH CORRESPONDING #( items )
+        RESULT DATA(promos_by_item)
+        LINK DATA(item_promo_links).
+
+    " Tip donusumu (bkz. validateOverlap aciklamasi)
+    lt_promos = CORRESPONDING #( promos_by_item ).
+
+    " 3) Ortak kontrolu calistir
+    DATA(conflicts) = lcl_overlap=>find( it_items  = items
+                                         it_promos = lt_promos ).
+
+    " 4) Onceki cakisma mesajlarini temizle
+    LOOP AT items INTO DATA(item).
+      APPEND VALUE #( %tky        = item-%tky
+                      %state_area = 'VALIDATE_OVERLAP' ) TO reported-item.
+    ENDLOOP.
+
+    " 5) Her cakisma icin ilgili kaleme hata yaz
+    LOOP AT conflicts INTO DATA(conflict).
+      DATA(conflict_item) = items[ conflict-item_index ].
+      DATA(promo_tky) = item_promo_links[ KEY id source-%tky = conflict_item-%tky ]-target-%tky.
+
+      APPEND VALUE #( %tky = conflict_item-%tky ) TO failed-item.
+      APPEND VALUE #( %tky        = conflict_item-%tky
+                      %state_area = 'VALIDATE_OVERLAP'
+                      %msg        = new_message_with_text(
+                                      severity = if_abap_behv_message=>severity-error
+                                      text     = |Product { conflict_item-ProductID } is already in { conflict-other_promo } for overlapping dates| )
+                      %path       = VALUE #( promotion-%tky = promo_tky )
+                      %element-ProductID = if_abap_behv=>mk-on )
+        TO reported-item.
     ENDLOOP.
   ENDMETHOD.
 
