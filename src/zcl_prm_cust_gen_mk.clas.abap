@@ -11,8 +11,8 @@ CLASS zcl_prm_cust_gen_mk IMPLEMENTATION.
     " Kampanya verisine DOKUNMAZ; istedigin kadar tekrar calistirabilirsin.
 
     " 1) Eski ayar verisini temizle
-    DELETE FROM zprm_status_mk.
-    DELETE FROM zprm_ptype_mk.
+    DELETE FROM zprm_status_mk. "#EC CI
+    DELETE FROM zprm_ptype_mk.  "#EC CI
 
     " 2) Durumlar, metinleri ve renkleri
     "    N = Yeni      -> 5 (mavi, bilgi)

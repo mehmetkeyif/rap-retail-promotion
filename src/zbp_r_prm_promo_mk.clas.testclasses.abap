@@ -252,18 +252,29 @@ CLASS ltc_behavior IMPLEMENTATION.
 
   METHOD overlap_is_detected.
     " Dogrulama: cevap tipleri LATE
-    DATA ls_failed   TYPE RESPONSE FOR FAILED LATE zr_prm_promo_mk.
-    DATA ls_reported TYPE RESPONSE FOR REPORTED LATE zr_prm_promo_mk.
-    DATA lt_promo    TYPE STANDARD TABLE OF zprm_promo_mk WITH EMPTY KEY.
-    DATA lt_item     TYPE STANDARD TABLE OF zprm_pitem_mk WITH EMPTY KEY.
-    DATA lv_today    TYPE d.
-    DATA lv_from     TYPE d.
-    DATA lv_to       TYPE d.
+    DATA ls_failed     TYPE RESPONSE FOR FAILED LATE zr_prm_promo_mk.
+    DATA ls_reported   TYPE RESPONSE FOR REPORTED LATE zr_prm_promo_mk.
+    DATA lt_promo      TYPE STANDARD TABLE OF zprm_promo_mk WITH EMPTY KEY.
+    DATA lt_item       TYPE STANDARD TABLE OF zprm_pitem_mk WITH EMPTY KEY.
+    DATA lv_today      TYPE d.
+    DATA lv_from       TYPE d.
+    DATA lv_to         TYPE d.
+    DATA lv_existing   TYPE sysuuid_x16.
+    DATA lv_item_uuid  TYPE sysuuid_x16.
+
+    " UUID uretimi nadiren hata (cx_uuid_error) firlatabilir.
+    " ATC, bu istisnanin yakalanmasini istiyor. Testte hata olursa
+    " testi anlamli bir mesajla basarisiz sayiyoruz.
+    TRY.
+        lv_existing  = cl_system_uuid=>create_uuid_x16_static( ).
+        lv_item_uuid = cl_system_uuid=>create_uuid_x16_static( ).
+      CATCH cx_uuid_error.
+        cl_abap_unit_assert=>fail( 'UUID could not be created' ).
+    ENDTRY.
 
     " GIVEN 1: SAHTE TABLODA P0001'i iceren yayindaki bir kampanya
     "          (bugun ... bugun+10). Cakisma kontrolu bunu SELECT ile bulacak.
     lv_today = cl_abap_context_info=>get_system_date( ).
-    DATA(lv_existing) = cl_system_uuid=>create_uuid_x16_static( ).
 
     lt_promo = VALUE #( ( promo_uuid    = lv_existing
                           promo_id      = 'PR00000099'
@@ -273,7 +284,7 @@ CLASS ltc_behavior IMPLEMENTATION.
                           valid_to      = lv_today + 10
                           status        = 'X'
                           currency_code = 'TRY' ) ).
-    lt_item = VALUE #( ( item_uuid     = cl_system_uuid=>create_uuid_x16_static( )
+    lt_item = VALUE #( ( item_uuid     = lv_item_uuid
                          parent_uuid   = lv_existing
                          product_id    = 'P0001'
                          regular_price = '89.90'

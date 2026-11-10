@@ -12,9 +12,9 @@ CLASS zcl_prm_data_gen_mk IMPLEMENTATION.
     DATA lv_ts    TYPE timestampl.
 
     " Eski test verisini temizle
-    DELETE FROM zprm_pitem_mk.
-    DELETE FROM zprm_promo_mk.
-    DELETE FROM zprm_prod_mk.
+    DELETE FROM zprm_pitem_mk. "#EC CI
+    DELETE FROM zprm_promo_mk. "#EC CI
+    DELETE FROM zprm_prod_mk.  "#EC CI
 
     " 1) Urunler
     lt_prod = VALUE #(
