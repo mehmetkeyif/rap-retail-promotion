@@ -1,53 +1,45 @@
 // ============================================================================
 // PROJEKSIYON GORUNUMU - Kampanya basligi
-// Alttaki is nesnesinin (ZR_PRM_PROMO_MK) Fiori uygulamasina acilan yuzu.
 // ============================================================================
-
-// Bu ornekte yetki kontrolu (DCL) yazmiyoruz; herkes tum kayitlari gorebilir.
 @AccessControl.authorizationCheck: #NOT_REQUIRED
 @EndUserText.label: 'Promotion - Projection'
-
-// Ekran anotasyonlarini (hangi alan listede, hangisi formda vb.) bu dosyaya
-// degil, ayri bir "Metadata Extension" dosyasina yazacagiz. Bu satir buna
-// izin verir. Boylece veri modeli ile ekran tasarimi birbirinden ayrilir.
 @Metadata.allowExtensions: true
-
-// Fiori listesinin ustundeki arama kutusu bu gorunumde calissin.
 @Search.searchable: true
-
-// "root" : Bu, projeksiyonun en ust varligi (kampanya basligi).
 define root view entity ZC_PRM_PROMO_MK
-
-  // provider contract transactional_query : Bu projeksiyonun hem okuma hem
-  // degistirme (transactional) yapan bir uygulama icin oldugunu belirtir.
-  // RAP buna gore kurallari kontrol eder.
   provider contract transactional_query
-
-  // Hangi is nesnesinin uzerine kuruldugu
   as projection on ZR_PRM_PROMO_MK
 {
   key PromoUUID,
-
-      // Arama kutusuna yazilan metin bu iki alanda aranir.
       @Search.defaultSearchElement: true
       PromoID,
       @Search.defaultSearchElement: true
       Description,
 
+      // YENI: Tur alani
+      //  text.element        : Kodun metni PromoTypeText alaninda
+      //  valueHelpDefinition : Bu alan icin ZI_PRM_PTYPE_MK listesinden
+      //                        secim yapilsin (acilir liste)
+      @ObjectModel.text.element: ['PromoTypeText']
+      @Consumption.valueHelpDefinition: [{ entity: { name: 'ZI_PRM_PTYPE_MK', element: 'PromoType' } }]
       PromoType,
+      // YENI: Baglantidan okunan metin. "_PromoType.TypeText" = baglanti
+      // uzerinden diger gorunumun alanina erisim (path expression).
+      _PromoType.TypeText    as PromoTypeText,
+
       ValidFrom,
       ValidTo,
+
+      // YENI: Durum alani, metni ve rengi
+      @ObjectModel.text.element: ['StatusText']
       Status,
+      _Status.StatusText     as StatusText,
+      _Status.Criticality    as StatusCriticality,
+
       CurrencyCode,
       LocalCreatedBy,
       LocalCreatedAt,
       LocalLastChangedBy,
       LocalLastChangedAt,
       LastChangedAt,
-
-      // Kalemlere gecis. Alt katmandaki _Item, R katmanindaki kalem
-      // gorunumunu gosteriyordu. Projeksiyonda bunu C katmanindaki kalem
-      // gorunumune "yonlendiriyoruz" (redirected), yoksa uygulama
-      // projeksiyonu atlayip cekirdege erisirdi.
       _Item : redirected to composition child ZC_PRM_PITEM_MK
 }

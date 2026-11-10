@@ -3,6 +3,15 @@
 define root view entity ZR_PRM_PROMO_MK
   as select from zprm_promo_mk
   composition [0..*] of ZR_PRM_PITEM_MK as _Item
+
+  // YENI: Durum ve tur metin tablolarina baglantilar.
+  // [0..1] = her kampanyanin en fazla bir durum/tur metni var.
+  // Baglanti (association) bir alan degil, "gerekirse oradan oku"
+  // demektir. Bu yuzden taslak tablosuna yeni sutun gerekmez.
+  association [0..1] to ZI_PRM_STATUS_MK as _Status
+    on $projection.Status = _Status.Status
+  association [0..1] to ZI_PRM_PTYPE_MK as _PromoType
+    on $projection.PromoType = _PromoType.PromoType
 {
   key promo_uuid            as PromoUUID,
       promo_id              as PromoID,
@@ -22,5 +31,8 @@ define root view entity ZR_PRM_PROMO_MK
       local_last_changed_at as LocalLastChangedAt,
       @Semantics.systemDateTime.lastChangedAt: true
       last_changed_at       as LastChangedAt,
-      _Item
+      _Item,
+      // YENI
+      _Status,
+      _PromoType
 }

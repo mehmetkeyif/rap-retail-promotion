@@ -1,11 +1,4 @@
-// ============================================================================
-// METADATA EXTENSION - Kampanya kalemi ekran tasarimi
-// Kalemler iki yerde gorunur:
-//  - Kampanya detayindaki "Items" tablosunda (lineItem)
-//  - Bir kaleme tiklandiginda acilan kendi detay ekraninda (identification)
-// ============================================================================
 @Metadata.layer: #CORE
-
 @UI: {
   headerInfo: {
     typeName:       'Item',
@@ -15,27 +8,27 @@
 }
 annotate entity ZC_PRM_PITEM_MK with
 {
-  // Kalem detay ekraninda tek bir form bolumu
   @UI.facet: [
-    { id:       'idItem',
-      purpose:  #STANDARD,
-      type:     #IDENTIFICATION_REFERENCE,
-      label:    'Item',
-      position: 10 } ]
+    { id: 'idItem', purpose: #STANDARD, type: #IDENTIFICATION_REFERENCE,
+      label: 'Item', position: 10 } ]
 
-  // Teknik anahtarlar gizli
   @UI.hidden: true
   ItemUUID;
   @UI.hidden: true
   ParentUUID;
 
+  // YENI: #TEXT_FIRST = once urun adi, parantez icinde kod:
+  // "Facial Cleanser 200 ml (P0006)"
   @UI: { lineItem:       [ { position: 10 } ],
-         identification: [ { position: 10 } ] }
+         identification: [ { position: 10 } ],
+         textArrangement: #TEXT_FIRST }
   @EndUserText.label: 'Product'
   ProductID;
 
-  // Tutar alanlari: Fiori, @Semantics baglantisi sayesinde para birimini
-  // tutarin yanina otomatik yazar (ornek: 89,90 TRY).
+  // YENI: Urun adi ayri sutun olarak gorunmesin (zaten urun alaninda var)
+  @UI.hidden: true
+  ProductName;
+
   @UI: { lineItem:       [ { position: 20 } ],
          identification: [ { position: 20 } ] }
   @EndUserText.label: 'Regular Price'

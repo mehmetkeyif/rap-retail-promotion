@@ -1,10 +1,4 @@
-// ============================================================================
-// METADATA EXTENSION - Kampanya ekran tasarimi
-// Fiori Elements bu anotasyonlari okuyup ekrani kendisi cizer.
-// ============================================================================
 @Metadata.layer: #CORE
-
-// Detay sayfasinin basligi
 @UI: {
   headerInfo: {
     typeName:       'Promotion',
@@ -15,39 +9,15 @@
 }
 annotate entity ZC_PRM_PROMO_MK with
 {
-  // --------------------------------------------------------------------------
-  // Detay sayfasindaki bolumler:
-  // 1) General : identification ile isaretli alanlarin formu
-  // 2) Items   : kalemler tablosu
-  // --------------------------------------------------------------------------
   @UI.facet: [
-    { id:       'idGeneral',
-      purpose:  #STANDARD,
-      type:     #IDENTIFICATION_REFERENCE,
-      label:    'General',
-      position: 10 },
-    { id:            'idItems',
-      purpose:       #STANDARD,
-      type:          #LINEITEM_REFERENCE,
-      label:         'Items',
-      position:      20,
-      targetElement: '_Item' } ]
+    { id: 'idGeneral', purpose: #STANDARD, type: #IDENTIFICATION_REFERENCE,
+      label: 'General', position: 10 },
+    { id: 'idItems', purpose: #STANDARD, type: #LINEITEM_REFERENCE,
+      label: 'Items', position: 20, targetElement: '_Item' } ]
 
   @UI.hidden: true
   PromoUUID;
 
-  // --------------------------------------------------------------------------
-  // YENI: Aksiyon butonlari
-  // Butonlar herhangi bir alanin anotasyonuna eklenebilir; biz PromoID'ye
-  // ekledik. Her listede (lineItem / identification) iki tur satir var:
-  //  { position: 10 }  : Normal alan (sutun veya form alani)
-  //  { type: #FOR_ACTION, dataAction: 'approve', label: 'Approve' }
-  //                    : Buton. dataAction, davranis tanimindaki aksiyon
-  //                      adiyla birebir ayni olmali.
-  // lineItem icindeki butonlar   -> liste tablosunun ustunde gorunur
-  // identification icindekiler   -> detay sayfasinin sag ustunde gorunur
-  // Butonun aktif/pasif olmasina get_instance_features metodu karar verir.
-  // --------------------------------------------------------------------------
   @UI: { lineItem:       [ { position: 10 },
                            { type: #FOR_ACTION, dataAction: 'approve', label: 'Approve' },
                            { type: #FOR_ACTION, dataAction: 'publish', label: 'Publish' } ],
@@ -63,10 +33,13 @@ annotate entity ZC_PRM_PROMO_MK with
   @EndUserText.label: 'Description'
   Description;
 
+  // YENI: textArrangement #TEXT_ONLY = kodu (P) degil, sadece metni
+  // (Percent discount) goster. Duzenleme modunda acilir liste gelir.
   @UI: { lineItem:       [ { position: 30 } ],
          identification: [ { position: 30 } ],
-         selectionField: [ { position: 20 } ] }
-  @EndUserText.label: 'Type (P/F/B)'
+         selectionField: [ { position: 20 } ],
+         textArrangement: #TEXT_ONLY }
+  @EndUserText.label: 'Type'
   PromoType;
 
   @UI: { lineItem:       [ { position: 40 } ],
@@ -79,17 +52,27 @@ annotate entity ZC_PRM_PROMO_MK with
   @EndUserText.label: 'Valid To'
   ValidTo;
 
-  @UI: { lineItem:       [ { position: 60 } ],
-         identification: [ { position: 60 } ],
-         selectionField: [ { position: 30 } ] }
-  @EndUserText.label: 'Status (N/A/X/E)'
+  // YENI: criticality = rengi StatusCriticality alanindan al
+  // (Yayinda = yesil, Onayli = sari, Yeni = mavi, Bitti = gri)
+  @UI: { lineItem:       [ { position: 60, criticality: 'StatusCriticality' } ],
+         identification: [ { position: 60, criticality: 'StatusCriticality' } ],
+         selectionField: [ { position: 30 } ],
+         textArrangement: #TEXT_ONLY }
+  @EndUserText.label: 'Status'
   Status;
 
   @UI.identification: [ { position: 70 } ]
   @EndUserText.label: 'Currency'
   CurrencyCode;
 
-  // Yonetim alanlari gizli
+  // YENI: Yardimci alanlar; ayri sutun olarak gorunmesinler
+  @UI.hidden: true
+  PromoTypeText;
+  @UI.hidden: true
+  StatusText;
+  @UI.hidden: true
+  StatusCriticality;
+
   @UI.hidden: true
   LocalCreatedBy;
   @UI.hidden: true

@@ -3,6 +3,7 @@
 {
 "FROM":
 [
+"ZI_PRM_PRODUCT_MK",
 "ZR_PRM_PITEM_MK"
 ],
 "ASSOCIATED":

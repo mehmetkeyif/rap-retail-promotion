@@ -3,6 +3,8 @@
 {
 "FROM":
 [
+"ZI_PRM_PTYPE_MK",
+"ZI_PRM_STATUS_MK",
 "ZR_PRM_PROMO_MK"
 ],
 "ASSOCIATED":
