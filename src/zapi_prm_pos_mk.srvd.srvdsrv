@@ -1,0 +1,4 @@
+@EndUserText.label: 'POS Promotion Price API'
+define service ZAPI_PRM_POS_MK {
+  expose ZI_PRM_POS_PRICE_MK as PromotionPrice;
+}
