@@ -1,30 +1,29 @@
 " ======================================================================
+" Test sinifinin on bildirimi. Asil tanimi Test Classes sekmesinde.
+" Asagidaki isleyici siniflar bu test sinifina "FRIENDS" ile ozel
+" metotlarina erisim izni veriyor.
+" ======================================================================
+CLASS ltc_behavior DEFINITION DEFERRED FOR TESTING.
+
+
+" ======================================================================
 " 0) YARDIMCI SINIF: Cakisma kontrolu
-"
-" Hem baslik hem kalem dogrulamasi ayni mantigi kullanir; kodu iki kez
-" yazmamak icin buraya topladik. Diger siniflardan ONCE tanimlanmali,
-" cunku onlar bunu kullaniyor.
-"
-" Girdi : kontrol edilecek kalemler + bu kalemlerin kampanyalari (tarihler)
+" Hem baslik hem kalem dogrulamasi ayni mantigi kullanir.
+" Girdi : kontrol edilecek kalemler + bu kalemlerin kampanyalari
 " Cikti : cakisan kalemlerin listesi (kacinci kalem, hangi kampanyayla)
 " ======================================================================
 CLASS lcl_overlap DEFINITION.
   PUBLIC SECTION.
-
-    " RAP'in turetilmis tiplerine once birer ad veriyoruz.
-    " Metot imzasinda (IMPORTING/RETURNING) bu adlari kullaniyoruz;
-    " turetilmis tip imzada dogrudan yazilamiyor.
+    " RAP'in turetilmis tiplerine ad veriyoruz (imzada dogrudan yazilamiyor)
     TYPES tt_items  TYPE TABLE FOR READ RESULT zr_prm_promo_mk\\Item.
     TYPES tt_promos TYPE TABLE FOR READ RESULT zr_prm_promo_mk\\Promotion.
 
-    " Bir cakisma kaydi: kontrol edilen kalemin sirasi ve cakistigi kampanya
     TYPES: BEGIN OF ty_conflict,
              item_index  TYPE i,
              other_promo TYPE zprm_promo_mk-promo_id,
            END OF ty_conflict,
            tt_conflict TYPE STANDARD TABLE OF ty_conflict WITH EMPTY KEY.
 
-    " Statik metot: nesne olusturmadan lcl_overlap=>find( ... ) ile cagrilir
     CLASS-METHODS find
       IMPORTING it_items            TYPE tt_items
                 it_promos           TYPE tt_promos
@@ -34,31 +33,22 @@ ENDCLASS.
 CLASS lcl_overlap IMPLEMENTATION.
   METHOD find.
     LOOP AT it_items INTO DATA(item).
-      " sy-tabix : LOOP icinde su anki satirin sira numarasi
       DATA(lv_index) = sy-tabix.
 
-      " Urun kodu bossa kontrol edecek bir sey yok
       IF item-ProductID IS INITIAL.
         CONTINUE.
       ENDIF.
 
-      " Bu kalemin kampanyasini bul (tarihleri icin).
-      " %is_draft'i de eslestiriyoruz: taslak kalemin taslak kampanyasi.
+      " Kalemin kampanyasini (tarihleri icin) bul
       READ TABLE it_promos INTO DATA(promo)
         WITH KEY PromoUUID = item-ParentUUID
                  %is_draft = item-%is_draft.
       IF sy-subrc <> 0 OR promo-ValidFrom IS INITIAL OR promo-ValidTo IS INITIAL.
-        CONTINUE.   " Tarih yoksa validateDates zaten hata verecek
+        CONTINUE.
       ENDIF.
 
-      " Ayni urunu iceren, tarihi cakisan BASKA bir kampanya var mi?
-      "  INNER JOIN : kalem tablosunu baslik tablosuyla birlestir
-      "  h~promo_uuid <> ... : kendi kampanyamizi haric tut
-      "  h~status <> 'E'     : bitmis kampanyalari sayma
-      "  son iki satir       : cakisma formulu
-      "     diger.baslangic <= bizim.bitis VE diger.bitis >= bizim.baslangic
-      " Not: Yalnizca KAYDEDILMIS kampanyalara bakiyoruz. Baska kullanicilarin
-      " henuz kaydetmedigi taslaklar sayilmaz; onlar kaydederken yakalanir.
+      " Ayni urunu iceren, tarihi cakisan BASKA bir (bitmemis) kampanya var mi?
+      " Cakisma: diger.baslangic <= bizim.bitis VE diger.bitis >= bizim.baslangic
       SELECT SINGLE FROM zprm_pitem_mk AS i
         INNER JOIN zprm_promo_mk AS h
           ON h~promo_uuid = i~parent_uuid
@@ -70,28 +60,22 @@ CLASS lcl_overlap IMPLEMENTATION.
           AND h~valid_to    >= @promo-ValidFrom
         INTO @DATA(lv_other_promo).
 
-      " sy-subrc = 0 : SELECT bir kayit buldu, yani cakisma var
       IF sy-subrc = 0.
         APPEND VALUE #( item_index  = lv_index
                         other_promo = lv_other_promo ) TO rt_conflicts.
       ENDIF.
     ENDLOOP.
-    " Not: Dongu icinde SELECT, birkac kalem icin sorun degil. Yuzlerce kalemli
-    " kampanyalarda tek bir toplu sorguya cevirmek gerekir (performans).
   ENDMETHOD.
 ENDCLASS.
 
 
 " ======================================================================
 " 1) KAMPANYA BASLIGI ISLEYICISI
-" Ortak kavramlar:
-"  keys          : Kuralin calisacagi kayitlarin anahtarlari (RAP verir)
-"  %tky          : Anahtar + taslak mi/asil mi bilgisi
-"  IN LOCAL MODE : Yetki ve readonly kontrollerini atla (kendi icimizden)
-"  failed        : "Bu kayitta islem basarisiz" listesi
-"  reported      : Kullaniciya gosterilecek mesajlar
+" FRIENDS ltc_behavior : Test sinifi bu sinifin ozel metotlarini
+"                        cagirabilsin.
 " ======================================================================
-CLASS lhc_Promotion DEFINITION INHERITING FROM cl_abap_behavior_handler.
+CLASS lhc_Promotion DEFINITION INHERITING FROM cl_abap_behavior_handler
+  FRIENDS ltc_behavior.
   PRIVATE SECTION.
     METHODS get_global_authorizations FOR GLOBAL AUTHORIZATION
       IMPORTING REQUEST requested_authorizations FOR Promotion
@@ -105,7 +89,6 @@ CLASS lhc_Promotion DEFINITION INHERITING FROM cl_abap_behavior_handler.
       IMPORTING keys FOR Promotion~setPromoID.
     METHODS validateDates FOR VALIDATE ON SAVE
       IMPORTING keys FOR Promotion~validateDates.
-    " Tarih degisince cakisma kontrolu
     METHODS validateOverlap FOR VALIDATE ON SAVE
       IMPORTING keys FOR Promotion~validateOverlap.
     METHODS approve FOR MODIFY
@@ -273,10 +256,9 @@ CLASS lhc_Promotion IMPLEMENTATION.
 
 
   METHOD validateOverlap.
-    " Kampanyanin tarihleri degistiginde TUM kalemlerini kontrol et.
+    " Tarih degisince kampanyanin TUM kalemleri icin cakisma kontrolu
     DATA lt_items TYPE lcl_overlap=>tt_items.
 
-    " 1) Kampanyalari (tarihleriyle) ve kalemlerini oku
     READ ENTITIES OF zr_prm_promo_mk IN LOCAL MODE
       ENTITY Promotion
         FIELDS ( PromoID ValidFrom ValidTo )
@@ -287,24 +269,17 @@ CLASS lhc_Promotion IMPLEMENTATION.
         WITH CORRESPONDING #( keys )
         RESULT DATA(items_by_promo).
 
-    " 2) "Kampanya uzerinden okunan kalem" tipini yardimci sinifin bekledigi
-    "    "kalem" tipine cevir. Alanlar ayni, tip adi farkli oldugu icin
-    "    CORRESPONDING ile ayni adli alanlari kopyaliyoruz.
     lt_items = CORRESPONDING #( items_by_promo ).
 
-    " 3) Ortak kontrolu calistir
     DATA(conflicts) = lcl_overlap=>find( it_items  = lt_items
                                          it_promos = promos ).
 
-    " 4) Her kampanya icin onceki cakisma mesajini temizle
     LOOP AT promos INTO DATA(promo).
       APPEND VALUE #( %tky        = promo-%tky
                       %state_area = 'VALIDATE_OVERLAP' ) TO reported-promotion.
     ENDLOOP.
 
-    " 5) Her cakisma icin kampanyaya hata yaz
     LOOP AT conflicts INTO DATA(conflict).
-      " Cakisan kalemi ve kampanyasini bul
       DATA(item)       = lt_items[ conflict-item_index ].
       DATA(item_promo) = promos[ PromoUUID = item-ParentUUID
                                  %is_draft = item-%is_draft ].
@@ -429,7 +404,8 @@ ENDCLASS.
 " ======================================================================
 " 2) KAMPANYA KALEMI ISLEYICISI
 " ======================================================================
-CLASS lhc_Item DEFINITION INHERITING FROM cl_abap_behavior_handler.
+CLASS lhc_Item DEFINITION INHERITING FROM cl_abap_behavior_handler
+  FRIENDS ltc_behavior.
   PRIVATE SECTION.
     METHODS fillFromProduct FOR DETERMINE ON MODIFY
       IMPORTING keys FOR Item~fillFromProduct.
@@ -437,7 +413,6 @@ CLASS lhc_Item DEFINITION INHERITING FROM cl_abap_behavior_handler.
       IMPORTING keys FOR Item~calculatePromoPrice.
     METHODS validateItem FOR VALIDATE ON SAVE
       IMPORTING keys FOR Item~validateItem.
-    " Urun eklenince/degisince cakisma kontrolu
     METHODS validateItemOverlap FOR VALIDATE ON SAVE
       IMPORTING keys FOR Item~validateItemOverlap.
 ENDCLASS.
@@ -537,18 +512,15 @@ CLASS lhc_Item IMPLEMENTATION.
 
 
   METHOD validateItemOverlap.
-    " Kalemde urun eklenince/degisince cakisma kontrolu
+    " Urun eklenince/degisince cakisma kontrolu
     DATA lt_promos TYPE lcl_overlap=>tt_promos.
 
-    " 1) Kalemleri oku
     READ ENTITIES OF zr_prm_promo_mk IN LOCAL MODE
       ENTITY Item
         FIELDS ( ProductID ParentUUID )
         WITH CORRESPONDING #( keys )
       RESULT DATA(items).
 
-    " 2) Kalemlerin kampanyalarini (tarihleriyle) oku.
-    "    LINK : hangi kalem hangi kampanyaya bagli (mesaj yolu icin)
     READ ENTITIES OF zr_prm_promo_mk IN LOCAL MODE
       ENTITY Item BY \_Promo
         FIELDS ( ValidFrom ValidTo )
@@ -556,20 +528,16 @@ CLASS lhc_Item IMPLEMENTATION.
         RESULT DATA(promos_by_item)
         LINK DATA(item_promo_links).
 
-    " Tip donusumu (bkz. validateOverlap aciklamasi)
     lt_promos = CORRESPONDING #( promos_by_item ).
 
-    " 3) Ortak kontrolu calistir
     DATA(conflicts) = lcl_overlap=>find( it_items  = items
                                          it_promos = lt_promos ).
 
-    " 4) Onceki cakisma mesajlarini temizle
     LOOP AT items INTO DATA(item).
       APPEND VALUE #( %tky        = item-%tky
                       %state_area = 'VALIDATE_OVERLAP' ) TO reported-item.
     ENDLOOP.
 
-    " 5) Her cakisma icin ilgili kaleme hata yaz
     LOOP AT conflicts INTO DATA(conflict).
       DATA(conflict_item) = items[ conflict-item_index ].
       DATA(promo_tky) = item_promo_links[ KEY id source-%tky = conflict_item-%tky ]-target-%tky.
