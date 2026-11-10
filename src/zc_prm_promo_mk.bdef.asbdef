@@ -9,6 +9,9 @@ strict ( 2 );
 
 // Cekirdekteki taslak destegini bu uygulamada kullan.
 use draft;
+// YENİ
+// Cekirdekteki yan etkileri (side effects) bu uygulamada da kullan.
+use side effects;
 
 define behavior for ZC_PRM_PROMO_MK alias Promotion
 use etag

@@ -1,28 +1,11 @@
 // ============================================================================
-// DAVRANIS TANIMI - Kampanya is nesnesi (TASLAK DESTEKLI)
-//
-// with draft : Kullanici Edit'e bastiginda asil kayit degil, onun bir kopyasi
-//              (taslak) duzenlenir. Save denince taslak asil kayda aktarilir.
-//              Yarida birakilirsa taslak saklanir, sonra devam edilebilir.
+// DAVRANIS TANIMI - Kampanya is nesnesi
+// Taslak destekli + belirlemeler + dogrulamalar
 // ============================================================================
 managed implementation in class zbp_r_prm_promo_mk unique;
 strict ( 2 );
 with draft;
 
-// ----------------------------------------------------------------------------
-// KOK VARLIK: Kampanya basligi
-// Asagidaki baslik satirlarinin anlami:
-//  persistent table : Asil verinin yazildigi tablo
-//  draft table      : Taslak kopyalarin tutuldugu tablo (Eclipse'e
-//                     olusturtacagiz)
-//  etag master      : Bu kaydin son degisiklik zamani. Iki kisinin ayni
-//                     kaydi ayni anda ezmesini engeller.
-//  lock master      : Kilitleme bu seviyede yapilir
-//  total etag       : Tum is nesnesinin (baslik + kalemler) son degisiklik
-//                     zamani. Taslaktan asil kayda aktarirken "bu arada
-//                     baskasi degistirdi mi?" kontrolu icin. Taslakta zorunlu.
-//  authorization master ( global ) : Genel yetki kontrolu bu seviyede
-// ----------------------------------------------------------------------------
 define behavior for ZR_PRM_PROMO_MK alias Promotion
 persistent table zprm_promo_mk
 draft table zprm_promo_d_mk
@@ -30,35 +13,50 @@ etag master LocalLastChangedAt
 lock master total etag LastChangedAt
 authorization master ( global )
 {
-  // Standart islemler
   create;
   update;
   delete;
-
-  // Kalem ekleme. "with draft" = kampanya taslaktayken eklenen kalem de
-  // taslak olarak eklenir.
   association _Item { create; with draft; }
 
-  // UUID otomatik uretilir; yonetim alanlari RAP tarafindan doldurulur.
   field ( numbering : managed, readonly ) PromoUUID;
-  field ( readonly ) LocalCreatedBy, LocalCreatedAt,
+
+  // YENI: PromoID ve Status artik kullanici tarafindan girilmez.
+  // PromoID kaydederken otomatik verilir; Status ilerideki
+  // Onayla/Aktive Et butonlariyla degisecek.
+  field ( readonly ) PromoID, Status,
+                     LocalCreatedBy, LocalCreatedAt,
                      LocalLastChangedBy, LocalLastChangedAt, LastChangedAt;
 
-  // Taslak yasam dongusu islemleri:
-  //  Edit     : Mevcut kayittan taslak olustur (Edit butonu)
-  //  Activate : Taslagi asil kayda aktar (Save butonu)
-  //             "optimized" = daha az veritabani erisimiyle calisan surum
-  //  Discard  : Taslagi at, degisikliklerden vazgec
-  //  Resume   : Yarim kalmis taslaga geri don
-  //  Prepare  : Kaydetmeden hemen once calisan kontrol noktasi. Ileride
-  //             yazacagimiz dogrulamalar burada tetiklenecek.
+  // YENI: Zorunlu alanlar. Fiori bu alanlari kirmizi yildizla gosterir.
+  field ( mandatory ) Description, PromoType, ValidFrom, ValidTo;
+
+  // YENI: BELIRLEMELER (veriyi degistiren kurallar)
+  // on modify { create; } : Kayit olusturuldugu anda calisir.
+  determination setDefaults on modify { create; }
+  // on save { create; } : Yeni kayit kaydedilirken (taslaktan asil kayda
+  // aktarilirken) calisir. Numara ancak kaydedilince verilir, boylece
+  // vazgecilen taslaklar numara harcamaz.
+  determination setPromoID on save { create; }
+
+  // YENI: DOGRULAMALAR (kontrol eden kurallar)
+  // Kayit olusturulurken veya bu iki alandan biri degistiginde,
+  // kaydetme aninda calisir.
+  validation validateDates on save { create; field ValidFrom, ValidTo; }
+
   draft action Edit;
   draft action Activate optimized;
   draft action Discard;
   draft action Resume;
-  draft determine action Prepare;
 
-  // CDS alani = tablo alani eslestirmesi
+  // YENI: Prepare, kaydetmeden hemen once calisan kontrol noktasi.
+  // Taslak senaryosunda dogrulamalar burada listelenmezse calismaz.
+  // "Item~validateItem" = Item varligindaki validateItem dogrulamasi.
+  draft determine action Prepare
+  {
+    validation validateDates;
+    validation Item~validateItem;
+  }
+
   mapping for zprm_promo_mk
   {
     PromoUUID          = promo_uuid;
@@ -77,12 +75,6 @@ authorization master ( global )
   }
 }
 
-// ----------------------------------------------------------------------------
-// ALT VARLIK: Kampanya kalemi
-//  draft table               : Kalemlerin taslak tablosu
-//  lock dependent by _Promo  : Kalem degisince bagli kampanya kilitlenir
-//  authorization dependent   : Yetki kampanyadan devralinir
-// ----------------------------------------------------------------------------
 define behavior for ZR_PRM_PITEM_MK alias Item
 persistent table zprm_pitem_mk
 draft table zprm_pitem_d_mk
@@ -92,12 +84,36 @@ authorization dependent by _Promo
 {
   update;
   delete;
-
-  // Kalemden kampanyaya gecis, taslak farkinda
   association _Promo { with draft; }
 
   field ( numbering : managed, readonly ) ItemUUID;
-  field ( readonly ) ParentUUID, LocalLastChangedAt;
+
+  // YENI: Normal fiyat ve para birimi urunden gelir, kampanya fiyati
+  // hesaplanir. Kullanici bunlari elle degistiremez.
+  field ( readonly ) ParentUUID, LocalLastChangedAt,
+                     RegularPrice, PromoPrice, CurrencyCode;
+
+  // YENI: Kullanicinin girmesi gereken iki alan
+  field ( mandatory ) ProductID, DiscountPct;
+
+  // YENI: BELIRLEMELER
+  // Urun secilince/degisince normal fiyati ve para birimini getir.
+  determination fillFromProduct on modify { create; field ProductID; }
+  // Indirim veya normal fiyat degisince kampanya fiyatini hesapla.
+  // fillFromProduct normal fiyati degistirdiginde bu da otomatik tetiklenir.
+  determination calculatePromoPrice on modify { field RegularPrice, DiscountPct; }
+
+  // YENI: DOGRULAMA
+  validation validateItem on save { create; field ProductID, DiscountPct; }
+
+  // YENI: YAN ETKILER (side effects)
+  // Fiori'ye "bu alan degisince su alanlari sunucudan yeniden oku" der.
+  // Bu olmazsa hesaplanan fiyatlar ekranda ancak sayfa yenilenince gorunur.
+  side effects
+  {
+    field ProductID affects field RegularPrice, field CurrencyCode, field PromoPrice;
+    field DiscountPct affects field PromoPrice;
+  }
 
   mapping for zprm_pitem_mk
   {
