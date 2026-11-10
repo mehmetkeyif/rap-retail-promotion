@@ -1,16 +1,11 @@
 // ============================================================================
-// PROJEKSIYON DAVRANIS TANIMI (TASLAK DESTEKLI)
-// Cekirdekte (ZR_) taslak destegini actik. Burada da bu destegin Fiori
-// uygulamasinda kullanilacagini soyluyoruz. Bunu yazmazsak cekirdek
-// taslakli olsa bile uygulama Edit/Save butonlarini gostermez.
+// PROJEKSIYON DAVRANIS TANIMI
+// Cekirdekteki (ZR_) islemlerden hangilerinin bu uygulamada kullanilacagini
+// secer. Burada yeni kural yazilmaz; sadece "use" ile mevcutlar disari acilir.
 // ============================================================================
 projection;
 strict ( 2 );
-
-// Cekirdekteki taslak destegini bu uygulamada kullan.
 use draft;
-// YENİ
-// Cekirdekteki yan etkileri (side effects) bu uygulamada da kullan.
 use side effects;
 
 define behavior for ZC_PRM_PROMO_MK alias Promotion
@@ -20,15 +15,16 @@ use etag
   use update;
   use delete;
 
-  // Taslak islemlerini Fiori'ye ac. Fiori bunlari gorunce
-  // Edit, Save ve Discard butonlarini kendisi ekler.
   use action Edit;
   use action Activate;
   use action Discard;
   use action Resume;
   use action Prepare;
 
-  // Kampanya taslaktayken kalem ekleme de taslak icinde calissin.
+  // Onayla ve Yayinla aksiyonlarini Fiori uygulamasina ac.
+  use action approve;
+  use action publish;
+
   use association _Item { create; with draft; }
 }
 
@@ -37,7 +33,5 @@ use etag
 {
   use update;
   use delete;
-
-  // Kalemden kampanyaya gecis taslak farkinda olsun.
   use association _Promo { with draft; }
 }

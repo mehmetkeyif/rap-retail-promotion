@@ -1,18 +1,11 @@
 " ======================================================================
 " DAVRANIS ISLEYICI SINIFLARI
-" Davranis tanimindaki her kural (determination, validation) icin burada
-" bir metot var. RAP bu metotlari dogru anda kendisi cagirir.
-"
 " Ortak kavramlar:
-"  keys         : Kuralin calisacagi kayitlarin anahtarlari (RAP verir)
-"  %tky         : "Transactional key" = anahtar + taslak mi/asil mi bilgisi.
-"                 Taslakli senaryoda kayitlari her zaman %tky ile tasiriz.
-"  IN LOCAL MODE: Yetki ve readonly kontrollerini atla. Kendi is
-"                 nesnemizin icinden readonly alanlari (PromoID, fiyatlar)
-"                 ancak bu modda degistirebiliriz.
-"  EML          : READ ENTITIES / MODIFY ENTITIES komutlari. Veritabani
-"                 tablosuna dogrudan degil, is nesnesi uzerinden erisim.
-"                 Taslaklar da dahil, RAP dogru yere okur/yazar.
+"  keys          : Kuralin calisacagi kayitlarin anahtarlari (RAP verir)
+"  %tky          : Anahtar + taslak mi/asil mi bilgisi
+"  IN LOCAL MODE : Yetki ve readonly kontrollerini atla (kendi icimizden)
+"  failed        : "Bu kayitta islem basarisiz" listesi
+"  reported      : Kullaniciya gosterilecek mesajlar
 " ======================================================================
 
 " ----------------------------------------------------------------------
@@ -21,22 +14,31 @@
 CLASS lhc_Promotion DEFINITION INHERITING FROM cl_abap_behavior_handler.
   PRIVATE SECTION.
 
-    " Genel yetki (dun yazdigimiz)
+    " Genel yetki: "Bu kullanici bu islemi yapabilir mi?"
     METHODS get_global_authorizations FOR GLOBAL AUTHORIZATION
       IMPORTING REQUEST requested_authorizations FOR Promotion
       RESULT result.
 
-    " Belirleme: varsayilan degerler (durum N, para birimi TRY)
+    " YENI - Ozellik kontrolu: "Bu kayitta bu buton acik mi kapali mi?"
+    METHODS get_instance_features FOR INSTANCE FEATURES
+      IMPORTING keys REQUEST requested_features FOR Promotion
+      RESULT result.
+
     METHODS setDefaults FOR DETERMINE ON MODIFY
       IMPORTING keys FOR Promotion~setDefaults.
 
-    " Belirleme: otomatik kampanya numarasi
     METHODS setPromoID FOR DETERMINE ON SAVE
       IMPORTING keys FOR Promotion~setPromoID.
 
-    " Dogrulama: tarih kontrolu
     METHODS validateDates FOR VALIDATE ON SAVE
       IMPORTING keys FOR Promotion~validateDates.
+
+    " YENI - Aksiyonlar. RESULT result : Aksiyon sonrasi guncel kayit
+    METHODS approve FOR MODIFY
+      IMPORTING keys FOR ACTION Promotion~approve RESULT result.
+
+    METHODS publish FOR MODIFY
+      IMPORTING keys FOR ACTION Promotion~publish RESULT result.
 
 ENDCLASS.
 
@@ -44,6 +46,8 @@ CLASS lhc_Promotion IMPLEMENTATION.
 
   METHOD get_global_authorizations.
     " Deneme projesi: herkese her isleme izin ver.
+    " DIKKAT: Yeni aksiyonlari buraya eklemezsek, dunku Edit butonu gibi
+    " Approve ve Publish butonlari da pasif kalir.
     IF requested_authorizations-%create = if_abap_behv=>mk-on.
       result-%create = if_abap_behv=>auth-allowed.
     ENDIF.
@@ -56,28 +60,82 @@ CLASS lhc_Promotion IMPLEMENTATION.
     IF requested_authorizations-%action-Edit = if_abap_behv=>mk-on.
       result-%action-Edit = if_abap_behv=>auth-allowed.
     ENDIF.
+    " YENI
+    IF requested_authorizations-%action-approve = if_abap_behv=>mk-on.
+      result-%action-approve = if_abap_behv=>auth-allowed.
+    ENDIF.
+    IF requested_authorizations-%action-publish = if_abap_behv=>mk-on.
+      result-%action-publish = if_abap_behv=>auth-allowed.
+    ENDIF.
+  ENDMETHOD.
+
+
+  METHOD get_instance_features.
+    " Fiori her kampanyayi gosterirken bu metodu cagirir ve butonlari
+    " buradan gelen cevaba gore acar/kapatir.
+    "
+    " Yetki ile farki: Yetki "KIM yapabilir?" sorusunu, ozellik kontrolu
+    " "Bu KAYITTA su an yapilabilir mi?" sorusunu cevaplar.
+
+    " 1) Kampanyalarin durumunu oku.
+    READ ENTITIES OF zr_prm_promo_mk IN LOCAL MODE
+      ENTITY Promotion
+        FIELDS ( Status )
+        WITH CORRESPONDING #( keys )
+      RESULT DATA(promos).
+
+    " 2) Her kampanya icin karar ver.
+    "    fc-o-enabled  : islem/buton acik
+    "    fc-o-disabled : islem/buton kapali (pasif)
+    "    COND #( WHEN ... THEN ... ELSE ... ) : kosula gore deger sec
+    result = VALUE #( FOR promo IN promos
+      LET locked = xsdbool( promo-Status = 'X' OR promo-Status = 'E' )
+      IN
+      ( %tky = promo-%tky
+
+        " Yayinda veya bitmis kampanya degistirilemez/silinemez,
+        " Edit acilamaz, kalem eklenemez.
+        %update      = COND #( WHEN locked = abap_true
+                               THEN if_abap_behv=>fc-o-disabled
+                               ELSE if_abap_behv=>fc-o-enabled )
+        %delete      = COND #( WHEN locked = abap_true
+                               THEN if_abap_behv=>fc-o-disabled
+                               ELSE if_abap_behv=>fc-o-enabled )
+        %action-Edit = COND #( WHEN locked = abap_true
+                               THEN if_abap_behv=>fc-o-disabled
+                               ELSE if_abap_behv=>fc-o-enabled )
+        %assoc-_Item = COND #( WHEN locked = abap_true
+                               THEN if_abap_behv=>fc-o-disabled
+                               ELSE if_abap_behv=>fc-o-enabled )
+
+        " Approve yalnizca Yeni (N) kampanyada
+        %action-approve = COND #( WHEN promo-Status = 'N'
+                                  THEN if_abap_behv=>fc-o-enabled
+                                  ELSE if_abap_behv=>fc-o-disabled )
+
+        " Publish yalnizca Onayli (A) kampanyada
+        %action-publish = COND #( WHEN promo-Status = 'A'
+                                  THEN if_abap_behv=>fc-o-enabled
+                                  ELSE if_abap_behv=>fc-o-disabled ) ) ).
+    " LET locked = ... IN : Her satir icin bir kez hesaplanan yardimci
+    " degisken. Ayni kosulu dort kez yazmamak icin.
+    " xsdbool( ... ) : Kosulu dogru/yanlis (abap_true/abap_false) degerine cevirir.
   ENDMETHOD.
 
 
   METHOD setDefaults.
-    " 1) Yeni olusturulan kampanyalarin mevcut durum ve para birimini oku.
-    "    WITH CORRESPONDING #( keys ) : keys tablosunu READ'in bekledigi
-    "    yapiya cevir.
+    " Yeni kampanyaya durum N ve para birimi TRY ver (dunku kod)
     READ ENTITIES OF zr_prm_promo_mk IN LOCAL MODE
       ENTITY Promotion
         FIELDS ( Status CurrencyCode )
         WITH CORRESPONDING #( keys )
       RESULT DATA(promos).
 
-    " 2) Durumu zaten dolu olanlari listeden cikar (tekrar ezmeyelim).
     DELETE promos WHERE Status IS NOT INITIAL.
     IF promos IS INITIAL.
       RETURN.
     ENDIF.
 
-    " 3) Kalanlara varsayilan degerleri yaz.
-    "    FOR promo IN promos : Her kayit icin bir satir uret (dongu ifadesi)
-    "    UPDATE FIELDS ( ... ) : Yalnizca bu alanlari degistir.
     MODIFY ENTITIES OF zr_prm_promo_mk IN LOCAL MODE
       ENTITY Promotion
         UPDATE FIELDS ( Status CurrencyCode )
@@ -91,56 +149,46 @@ CLASS lhc_Promotion IMPLEMENTATION.
 
 
   METHOD setPromoID.
-    DATA lv_last   TYPE i.             " Son kullanilan numara (sayi olarak)
-    DATA lv_numc   TYPE n LENGTH 8.    " 8 haneli, basi sifirli numara
+    " Kaydederken otomatik kampanya numarasi ver (dunku kod)
+    DATA lv_last   TYPE i.
+    DATA lv_numc   TYPE n LENGTH 8.
     DATA lt_update TYPE TABLE FOR UPDATE zr_prm_promo_mk\\Promotion.
 
-    " 1) Kaydedilen kampanyalarin PromoID'sini oku.
     READ ENTITIES OF zr_prm_promo_mk IN LOCAL MODE
       ENTITY Promotion
         FIELDS ( PromoID )
         WITH CORRESPONDING #( keys )
       RESULT DATA(promos).
 
-    " 2) Numarasi zaten olanlari atla.
     DELETE promos WHERE PromoID IS NOT INITIAL.
     IF promos IS INITIAL.
       RETURN.
     ENDIF.
 
-    " 3) Veritabanindaki en buyuk numarayi bul (ornek: PR00000003).
     SELECT SINGLE FROM zprm_promo_mk
       FIELDS MAX( promo_id )
       INTO @DATA(lv_max_id).
 
-    " 4) 'PR' onekinden sonraki 8 haneyi sayiya cevir.
-    "    Hic kampanya yoksa 0'dan basla.
     IF lv_max_id IS NOT INITIAL.
       lv_last = substring( val = lv_max_id off = 2 len = 8 ).
     ENDIF.
 
-    " 5) Her yeni kampanyaya sirayla bir sonraki numarayi ver.
     LOOP AT promos INTO DATA(promo).
       lv_last = lv_last + 1.
-      lv_numc = lv_last.              " 4 -> '00000004'
+      lv_numc = lv_last.
       APPEND VALUE #( %tky    = promo-%tky
                       PromoID = |PR{ lv_numc }| ) TO lt_update.
     ENDLOOP.
 
-    " 6) Numaralari yaz.
     MODIFY ENTITIES OF zr_prm_promo_mk IN LOCAL MODE
       ENTITY Promotion
         UPDATE FIELDS ( PromoID )
         WITH lt_update.
-
-    " Not: Iki kullanici ayni anda kaydederse ayni numarayi alabilir.
-    " Gercek projede bunun yerine numara araligi nesnesi
-    " (cl_numberrange_runtime) kullanilir. Ogrenme amacli basit tuttuk.
   ENDMETHOD.
 
 
   METHOD validateDates.
-    " 1) Kontrol edilecek kampanyalarin tarihlerini oku.
+    " Tarih kontrolu (dunku kod)
     READ ENTITIES OF zr_prm_promo_mk IN LOCAL MODE
       ENTITY Promotion
         FIELDS ( ValidFrom ValidTo )
@@ -148,19 +196,10 @@ CLASS lhc_Promotion IMPLEMENTATION.
       RESULT DATA(promos).
 
     LOOP AT promos INTO DATA(promo).
-
-      " 2) Bu dogrulamanin onceki mesajlarini temizle.
-      "    %state_area : Mesajlarin "grubu". Ayni gruba bos bir satir
-      "    eklemek, taslakta daha once cikan eski hatayi siler. Boylece
-      "    kullanici hatayi duzeltince mesaj ekrandan kalkar.
       APPEND VALUE #( %tky        = promo-%tky
                       %state_area = 'VALIDATE_DATES' ) TO reported-promotion.
 
       IF promo-ValidFrom IS INITIAL OR promo-ValidTo IS INITIAL.
-        " 3a) Tarihlerden biri bos.
-        "     failed   : RAP'a "bu kayit kaydedilemez" der.
-        "     reported : Kullaniciya gosterilecek mesaj.
-        "     %element : Mesaj hangi alanlarin yaninda gosterilsin.
         APPEND VALUE #( %tky = promo-%tky ) TO failed-promotion.
         APPEND VALUE #( %tky        = promo-%tky
                         %state_area = 'VALIDATE_DATES'
@@ -170,9 +209,7 @@ CLASS lhc_Promotion IMPLEMENTATION.
                         %element-ValidFrom = if_abap_behv=>mk-on
                         %element-ValidTo   = if_abap_behv=>mk-on )
           TO reported-promotion.
-
       ELSEIF promo-ValidTo < promo-ValidFrom.
-        " 3b) Bitis tarihi baslangictan once.
         APPEND VALUE #( %tky = promo-%tky ) TO failed-promotion.
         APPEND VALUE #( %tky        = promo-%tky
                         %state_area = 'VALIDATE_DATES'
@@ -182,63 +219,170 @@ CLASS lhc_Promotion IMPLEMENTATION.
                         %element-ValidTo = if_abap_behv=>mk-on )
           TO reported-promotion.
       ENDIF.
-
     ENDLOOP.
+  ENDMETHOD.
+
+
+  METHOD approve.
+    " YENI - Kampanyayi onayla: N -> A
+    " Kural: En az bir kalemi olmayan kampanya onaylanamaz.
+    DATA lt_ok TYPE TABLE FOR UPDATE zr_prm_promo_mk\\Promotion.
+
+    " 1) Kampanyalari VE kalemlerini tek komutta oku.
+    "    BY \_Item : Kampanyadan kalemlerine gecis (association ile okuma)
+    READ ENTITIES OF zr_prm_promo_mk IN LOCAL MODE
+      ENTITY Promotion
+        FIELDS ( PromoID Status )
+        WITH CORRESPONDING #( keys )
+        RESULT DATA(promos)
+      ENTITY Promotion BY \_Item
+        FIELDS ( ParentUUID )
+        WITH CORRESPONDING #( keys )
+        RESULT DATA(items).
+
+    LOOP AT promos INTO DATA(promo).
+
+      " 2) Bu kampanyaya ait kalem var mi?
+      "    line_exists( ... ) : Tabloda bu kosula uyan satir var mi?
+      "    %is_draft'i de karsilastiriyoruz: taslak kampanyanin taslak
+      "    kalemleri, asil kampanyanin asil kalemleri sayilmali.
+      IF NOT line_exists( items[ ParentUUID = promo-PromoUUID
+                                 %is_draft  = promo-%is_draft ] ).
+        " Kalem yok: islemi reddet ve kullaniciya soyle.
+        APPEND VALUE #( %tky = promo-%tky ) TO failed-promotion.
+        APPEND VALUE #( %tky = promo-%tky
+                        %msg = new_message_with_text(
+                                 severity = if_abap_behv_message=>severity-error
+                                 text     = |{ promo-PromoID }: add at least one item before approving| ) )
+          TO reported-promotion.
+        CONTINUE.   " Bu kampanyayi atla, siradakine gec
+      ENDIF.
+
+      " 3) Kurala uyuyor: onaylanacaklar listesine ekle ve basari mesaji ver.
+      APPEND VALUE #( %tky = promo-%tky Status = 'A' ) TO lt_ok.
+      APPEND VALUE #( %tky = promo-%tky
+                      %msg = new_message_with_text(
+                               severity = if_abap_behv_message=>severity-success
+                               text     = |{ promo-PromoID } approved| ) )
+        TO reported-promotion.
+    ENDLOOP.
+
+    " 4) Durumlari guncelle (Status readonly; IN LOCAL MODE sayesinde yazabiliyoruz)
+    IF lt_ok IS NOT INITIAL.
+      MODIFY ENTITIES OF zr_prm_promo_mk IN LOCAL MODE
+        ENTITY Promotion
+          UPDATE FIELDS ( Status )
+          WITH lt_ok.
+    ENDIF.
+
+    " 5) Guncel kayitlari Fiori'ye geri dondur (result [1] $self).
+    "    ALL FIELDS : tum alanlari oku
+    "    %param     : aksiyonun dondurdugu veri
+    READ ENTITIES OF zr_prm_promo_mk IN LOCAL MODE
+      ENTITY Promotion
+        ALL FIELDS
+        WITH CORRESPONDING #( keys )
+      RESULT DATA(updated).
+
+    result = VALUE #( FOR upd IN updated
+                      ( %tky   = upd-%tky
+                        %param = upd ) ).
+  ENDMETHOD.
+
+
+  METHOD publish.
+    " YENI - Kampanyayi yayinla (magazalara/POS'a gonder): A -> X
+    " Kural: Bitis tarihi gecmis kampanya yayinlanamaz.
+    DATA lt_ok TYPE TABLE FOR UPDATE zr_prm_promo_mk\\Promotion.
+
+    " Bugunun tarihi (ABAP Cloud'da sy-datum yerine onerilen yol)
+    DATA(lv_today) = cl_abap_context_info=>get_system_date( ).
+
+    READ ENTITIES OF zr_prm_promo_mk IN LOCAL MODE
+      ENTITY Promotion
+        FIELDS ( PromoID Status ValidTo )
+        WITH CORRESPONDING #( keys )
+      RESULT DATA(promos).
+
+    LOOP AT promos INTO DATA(promo).
+
+      IF promo-ValidTo < lv_today.
+        APPEND VALUE #( %tky = promo-%tky ) TO failed-promotion.
+        APPEND VALUE #( %tky = promo-%tky
+                        %msg = new_message_with_text(
+                                 severity = if_abap_behv_message=>severity-error
+                                 text     = |{ promo-PromoID }: end date is in the past, cannot publish| ) )
+          TO reported-promotion.
+        CONTINUE.
+      ENDIF.
+
+      APPEND VALUE #( %tky = promo-%tky Status = 'X' ) TO lt_ok.
+      APPEND VALUE #( %tky = promo-%tky
+                      %msg = new_message_with_text(
+                               severity = if_abap_behv_message=>severity-success
+                               text     = |{ promo-PromoID } published to stores| ) )
+        TO reported-promotion.
+
+      " Gercek projede burada kampanya POS sistemlerine gonderilir
+      " (ornegin bir is olayi / business event yayinlanarak).
+      " Bunu 8. haftada Web API ile ele alacagiz.
+    ENDLOOP.
+
+    IF lt_ok IS NOT INITIAL.
+      MODIFY ENTITIES OF zr_prm_promo_mk IN LOCAL MODE
+        ENTITY Promotion
+          UPDATE FIELDS ( Status )
+          WITH lt_ok.
+    ENDIF.
+
+    READ ENTITIES OF zr_prm_promo_mk IN LOCAL MODE
+      ENTITY Promotion
+        ALL FIELDS
+        WITH CORRESPONDING #( keys )
+      RESULT DATA(updated).
+
+    result = VALUE #( FOR upd IN updated
+                      ( %tky   = upd-%tky
+                        %param = upd ) ).
   ENDMETHOD.
 
 ENDCLASS.
 
 
 " ----------------------------------------------------------------------
-" 2) KAMPANYA KALEMI ISLEYICISI
+" 2) KAMPANYA KALEMI ISLEYICISI (dunku kodun aynisi)
 " ----------------------------------------------------------------------
 CLASS lhc_Item DEFINITION INHERITING FROM cl_abap_behavior_handler.
   PRIVATE SECTION.
-
-    " Belirleme: urunden normal fiyat ve para birimini getir
     METHODS fillFromProduct FOR DETERMINE ON MODIFY
       IMPORTING keys FOR Item~fillFromProduct.
-
-    " Belirleme: kampanya fiyatini hesapla
     METHODS calculatePromoPrice FOR DETERMINE ON MODIFY
       IMPORTING keys FOR Item~calculatePromoPrice.
-
-    " Dogrulama: urun var mi, indirim mantikli mi
     METHODS validateItem FOR VALIDATE ON SAVE
       IMPORTING keys FOR Item~validateItem.
-
 ENDCLASS.
 
 CLASS lhc_Item IMPLEMENTATION.
 
   METHOD fillFromProduct.
-    " 1) Degisen kalemlerin urun kodunu oku.
+    " Urun secilince normal fiyat ve para birimini getir
     READ ENTITIES OF zr_prm_promo_mk IN LOCAL MODE
       ENTITY Item
         FIELDS ( ProductID )
         WITH CORRESPONDING #( keys )
       RESULT DATA(items).
 
-    " Urun kodu bos olanlarla ugrasma.
     DELETE items WHERE ProductID IS INITIAL.
     IF items IS INITIAL.
       RETURN.
     ENDIF.
 
-    " 2) Bu urunlerin fiyatlarini urun gorunumunden tek seferde oku.
-    "    FOR ALL ENTRIES IN @items : items tablosundaki her urun kodu icin.
-    "    Tabloya degil CDS gorunumune (ZI_) erisiyoruz; ABAP Cloud'da
-    "    onerilen yol budur.
     SELECT FROM zi_prm_product_mk
       FIELDS ProductID, BasePrice, CurrencyCode
       FOR ALL ENTRIES IN @items
       WHERE ProductID = @items-ProductID
       INTO TABLE @DATA(products).
 
-    " 3) Her kaleme kendi urununun fiyatini yaz.
-    "    products[ ProductID = ... ] : Tablodan anahtara gore satir oku.
-    "    OPTIONAL : Urun bulunamazsa hata verme, bos deger kullan.
-    "    (Bulunamayan urunu validateItem yakalayacak.)
     MODIFY ENTITIES OF zr_prm_promo_mk IN LOCAL MODE
       ENTITY Item
         UPDATE FIELDS ( RegularPrice CurrencyCode )
@@ -250,16 +394,13 @@ CLASS lhc_Item IMPLEMENTATION.
 
 
   METHOD calculatePromoPrice.
-    " 1) Normal fiyat ve indirim oranini oku.
+    " Kampanya fiyati = Normal fiyat x (100 - indirim) / 100
     READ ENTITIES OF zr_prm_promo_mk IN LOCAL MODE
       ENTITY Item
         FIELDS ( RegularPrice DiscountPct )
         WITH CORRESPONDING #( keys )
       RESULT DATA(items).
 
-    " 2) Kampanya fiyati = Normal fiyat x (100 - indirim) / 100
-    "    Ornek: 179,90 x (100 - 10) / 100 = 161,91
-    "    Sonuc 2 ondalikli tutar alanina yazilirken otomatik yuvarlanir.
     MODIFY ENTITIES OF zr_prm_promo_mk IN LOCAL MODE
       ENTITY Item
         UPDATE FIELDS ( PromoPrice )
@@ -270,34 +411,24 @@ CLASS lhc_Item IMPLEMENTATION.
 
 
   METHOD validateItem.
-    " 1) Kontrol edilecek kalemleri oku.
+    " Urun var mi, indirim %0-%100 arasinda mi
     READ ENTITIES OF zr_prm_promo_mk IN LOCAL MODE
       ENTITY Item
         FIELDS ( ProductID RegularPrice DiscountPct )
         WITH CORRESPONDING #( keys )
       RESULT DATA(items).
 
-    " 2) Her kalemin bagli oldugu kampanyayi bul.
-    "    BY \_Promo : Kalemden kampanyaya gecis (association)
-    "    LINK       : "Hangi kalem hangi kampanyaya bagli" eslesme tablosu
-    "    Neden gerekli? Fiori'nin kalem mesajini dogru yerde (kampanya >
-    "    kalem) gosterebilmesi icin mesaja yol (%path) eklememiz gerekiyor.
     READ ENTITIES OF zr_prm_promo_mk IN LOCAL MODE
       ENTITY Item BY \_Promo
         FROM CORRESPONDING #( items )
       LINK DATA(item_promo_links).
 
     LOOP AT items INTO DATA(item).
-
-      " Bu kalemin kampanyasinin anahtari
       DATA(promo_tky) = item_promo_links[ KEY id source-%tky = item-%tky ]-target-%tky.
 
-      " Onceki mesajlari temizle (bkz. validateDates aciklamasi)
       APPEND VALUE #( %tky        = item-%tky
                       %state_area = 'VALIDATE_ITEM' ) TO reported-item.
 
-      " 3a) Urun bulunamadi: fillFromProduct normal fiyati dolduramamissa
-      "     urun kodu ya bos ya da gecersizdir.
       IF item-RegularPrice IS INITIAL.
         APPEND VALUE #( %tky = item-%tky ) TO failed-item.
         APPEND VALUE #( %tky        = item-%tky
@@ -310,7 +441,6 @@ CLASS lhc_Item IMPLEMENTATION.
           TO reported-item.
       ENDIF.
 
-      " 3b) Indirim %0'dan buyuk, %100'den kucuk olmali.
       IF item-DiscountPct <= 0 OR item-DiscountPct >= 100.
         APPEND VALUE #( %tky = item-%tky ) TO failed-item.
         APPEND VALUE #( %tky        = item-%tky
@@ -322,7 +452,6 @@ CLASS lhc_Item IMPLEMENTATION.
                         %element-DiscountPct = if_abap_behv=>mk-on )
           TO reported-item.
       ENDIF.
-
     ENDLOOP.
   ENDMETHOD.
 
