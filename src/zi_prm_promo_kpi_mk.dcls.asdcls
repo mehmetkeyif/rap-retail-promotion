@@ -1,0 +1,10 @@
+@EndUserText.label: 'Promotion KPIs access'
+@MappingRole: true
+define role ZI_PRM_PROMO_KPI_MK {
+  grant select on ZI_PRM_PROMO_KPI_MK
+    // Kural 1: kampanyayı oturumdaki kullanıcı oluşturduysa göster
+    where CreatedBy = $session.user
+    // Kural 2: VEYA oluşturan alanı boşsa göster
+    // (veri üretici sınıfının eklediği PR1–PR3 için)
+       or CreatedBy is initial;
+}
