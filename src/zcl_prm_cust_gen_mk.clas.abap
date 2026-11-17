@@ -5,7 +5,11 @@ CLASS zcl_prm_cust_gen_mk DEFINITION
     INTERFACES if_oo_adt_classrun.
 ENDCLASS.
 
-CLASS zcl_prm_cust_gen_mk IMPLEMENTATION.
+
+
+CLASS ZCL_PRM_CUST_GEN_MK IMPLEMENTATION.
+
+
   METHOD if_oo_adt_classrun~main.
     " Ayar tablolarini (durum ve tur metinleri) doldurur.
     " Kampanya verisine DOKUNMAZ; istedigin kadar tekrar calistirabilirsin.

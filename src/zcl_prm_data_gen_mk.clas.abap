@@ -4,7 +4,11 @@ CLASS zcl_prm_data_gen_mk DEFINITION
     INTERFACES if_oo_adt_classrun.
 ENDCLASS.
 
-CLASS zcl_prm_data_gen_mk IMPLEMENTATION.
+
+
+CLASS ZCL_PRM_DATA_GEN_MK IMPLEMENTATION.
+
+
   METHOD if_oo_adt_classrun~main.
     DATA lt_prod  TYPE STANDARD TABLE OF zprm_prod_mk  WITH EMPTY KEY.
     DATA lt_promo TYPE STANDARD TABLE OF zprm_promo_mk WITH EMPTY KEY.
