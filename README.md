@@ -180,6 +180,12 @@ Requirements: SAP BTP ABAP Environment (trial or licensed), Eclipse with ABAP De
 
 ---
 
+## Related project
+
+[joule-maintenance-agent](https://github.com/mehmetkeyif/joule-maintenance-agent): custom Joule agent and skill built with SAP Build Joule Studio, with an implementation guide, answer validation and hallucination tests.
+
+---
+
 ## Author
 
 **Mehmet Keyif** — SAP technical consultant with 25 years of experience in ABAP, S/4HANA conversion, data migration and retail POS / EDI integration.
