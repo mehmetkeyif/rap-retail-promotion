@@ -111,9 +111,16 @@ CLASS zcl_prm_profit_calc_mk IMPLEMENTATION.
     DATA(lt_oo) = calculate_all( ).
 
     " ---- 2) AMDP motorunun sonuçlarını oku (table function'ı normal tablo gibi) ----
-    SELECT item_uuid, effective_price, unit_margin, margin_pct, profit_status
-      FROM zi_prm_promo_profit_tf
-      INTO TABLE @DATA(lt_amdp).
+    " Yalnızca OO motorunun hesapladığı kalemler.
+    " DİKKAT: FOR ALL ENTRIES'te iç tablo BOŞSA WHERE koşulu yok sayılır
+    " ve TÜM tablo okunur! Bu yüzden önce boş mu diye kontrol ediyoruz.
+    IF lt_oo IS NOT INITIAL.
+      SELECT item_uuid, effective_price, unit_margin, margin_pct, profit_status
+        FROM zi_prm_promo_profit_tf
+        FOR ALL ENTRIES IN @lt_oo
+        WHERE item_uuid = @lt_oo-item_uuid
+        INTO TABLE @DATA(lt_amdp).
+    ENDIF.
 
     " ---- 3) Satır satır karşılaştır ----
     out->write( |Kampanya   Ürün   Tip  Strateji          Etkin   Marj    Marj%  Durum  AMDP| ).

@@ -39,8 +39,11 @@ CLASS zcl_prm_cost_gen_mk IMPLEMENTATION.
       ( product_id = 'P0010' ratio = '0.75' ) ).
 
     " ---- 2) Ürünleri oku ----
+    " Yalnızca oran tanımlı ürünleri oku (FOR ALL ENTRIES: iç tablodaki her satır için koşul)
     SELECT product_id, base_price
       FROM zprm_prod_mk
+      FOR ALL ENTRIES IN @lt_ratio
+      WHERE product_id = @lt_ratio-product_id
       INTO TABLE @DATA(lt_products).
 
     " ---- 3) Her ürün için maliyeti hesapla ve yaz ----

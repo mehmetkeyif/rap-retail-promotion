@@ -449,19 +449,65 @@ CLASS lhc_Item IMPLEMENTATION.
 
 
   METHOD calculatePromoPrice.
-    " Kampanya fiyati = Normal fiyat x (100 - indirim) / 100
+    " ------------------------------------------------------------
+    " Kampanya fiyatını KAMPANYA TİPİNE göre hesaplar.
+    " Fiyat kuralı tek yerde: ZCL_PRM_STRATEGY_FACTORY_MK (Strategy deseni).
+    " Aynı kural AMDP ve OO motorunda da kullanılıyor.
+    " ------------------------------------------------------------
+
+    " 1) Değişen kalemlerin fiyat ve indirim bilgisi
+    "    + her kalemin bağlı olduğu kampanyanın TİPİ (BY \_Promo ile üst kayıt)
+    "    LINK: hangi kalemin hangi kampanyaya bağlı olduğunu gösteren eşleme tablosu
     READ ENTITIES OF zr_prm_promo_mk IN LOCAL MODE
       ENTITY Item
         FIELDS ( RegularPrice DiscountPct )
         WITH CORRESPONDING #( keys )
-      RESULT DATA(items).
+        RESULT DATA(items)
+      ENTITY Item BY \_Promo
+        FIELDS ( PromoType )
+        WITH CORRESPONDING #( keys )
+        RESULT DATA(promos)
+        LINK DATA(links).
 
+    DATA lt_update TYPE TABLE FOR UPDATE zr_prm_promo_mk\\Item.
+
+    LOOP AT items INTO DATA(item).
+
+      " 2) Bu kalemin kampanyasını LINK tablosundan bul, tipini al
+      "    (OPTIONAL: bulunamazsa boş döner, dump vermez)
+      DATA(lv_promo_tky) = VALUE #( links[ source-%tky = item-%tky ]-target-%tky OPTIONAL ).
+      DATA(lv_type)      = VALUE #( promos[ %tky = lv_promo_tky ]-PromoType OPTIONAL ).
+
+      " 3) Yüzdeden hesaplanan temel fiyat
+      "    (F tipinde 'kayıtlı fiyat' olarak bu kullanılır; ekranda sabit fiyat girişi yok)
+      DATA(lv_base) = CONV zif_prm_price_strategy_mk=>ty_amount(
+                        item-RegularPrice * ( 100 - item-DiscountPct ) / 100 ).
+
+      " 4) Stratejiye verilecek kalem bilgisi
+      DATA(ls_item) = VALUE zif_prm_price_strategy_mk=>ty_item(
+                        promo_type    = lv_type
+                        regular_price = item-RegularPrice
+                        promo_price   = lv_base
+                        discount_pct  = item-DiscountPct ).
+
+      " 5) Factory'den stratejiyi al ve etkin fiyatı hesapla
+      "    (zincirleme çağrı: metodun döndürdüğü nesnenin metodunu hemen çağırıyoruz)
+      DATA(lv_price) = zcl_prm_strategy_factory_mk=>get_strategy( lv_type
+                         )->get_effective_price( ls_item ).
+
+      " 6) Güncelleme satırı: yalnızca PromoPrice değişsin (%control)
+      APPEND VALUE #( %tky                = item-%tky
+                      PromoPrice          = lv_price
+                      %control-PromoPrice = if_abap_behv=>mk-on ) TO lt_update.
+    ENDLOOP.
+
+    " 7) Hesaplanan fiyatları yaz
     MODIFY ENTITIES OF zr_prm_promo_mk IN LOCAL MODE
       ENTITY Item
-        UPDATE FIELDS ( PromoPrice )
-        WITH VALUE #( FOR item IN items
-                      ( %tky       = item-%tky
-                        PromoPrice = item-RegularPrice * ( 100 - item-DiscountPct ) / 100 ) ).
+        UPDATE FROM lt_update
+      REPORTED DATA(update_reported).
+
+    reported = CORRESPONDING #( DEEP update_reported ).
   ENDMETHOD.
 
 
