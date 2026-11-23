@@ -27,16 +27,19 @@ A retail chain's pricing team plans promotions (e.g. *"Haircare Week – 20% off
 | **Fiori Elements UI** | List report and object page with search, filters, value helps and status colors |
 | **Draft handling** | Users can save incomplete work and continue later; changes go live only on *Save* |
 | **Automatic numbering** | Promotion IDs (`PR00000001`, …) are assigned on save |
-| **Price calculation** | Selecting a product fills its regular price; entering a discount calculates the promotion price instantly (side effects) |
+| **Price calculation** | Selecting a product fills its regular price; the promotion price is calculated instantly by a **type-specific pricing strategy** (percent, fixed price, buy 3 pay 2) |
 | **Business validations** | Date checks, product existence, discount range, **overlapping promotion check** |
 | **Lifecycle actions** | *Approve* and *Publish* buttons with status-dependent enablement (feature control) |
-| **POS Web API** | Read-only OData V4 API exposing prices of published promotions |
-| **Unit tests** | ABAP Unit tests using RAP transactional buffer test doubles |
+| **POS Web API** | Read-only OData V4 API exposing prices of published promotions, also **by key date** (parameterized CDS) |
+| **Promotion KPIs** | Aggregated KPIs per promotion (item count, average/max discount, total saving) with **row-level access control (DCL)** |
+| **Profitability analysis** | Unit margin and LOSS / LOW / OK status per item, calculated twice — in **HANA with AMDP** and in **ABAP Objects** with the Strategy pattern — and cross-checked |
+| **Unit tests** | 16 ABAP Unit tests: RAP transactional buffer doubles, CDS test doubles and pure OO logic tests |
 
 ### Key business rules
 
 - End date must not be before start date.
-- Discount must be between 0% and 100%; promotion price = regular price × (100 − discount) / 100.
+- Discount must be between 0% and 100%.
+- Promotion price depends on the promotion type: **P** percent → regular × (100 − discount) / 100 · **F** fixed price · **B** buy 3 pay 2 → regular × 2 / 3.
 - **The same product cannot be in two promotions with overlapping dates** — otherwise the POS cannot decide which price applies. Checked both when items are added and when promotion dates change.
 - A promotion without items cannot be approved.
 - A promotion whose end date has passed cannot be published.
@@ -85,15 +88,77 @@ flowchart TB
 | CDS – business object | `ZR_PRM_PROMO_MK` (root), `ZR_PRM_PITEM_MK` (child) |
 | CDS – master data / texts | `ZI_PRM_PRODUCT_MK`, `ZI_PRM_STATUS_MK`, `ZI_PRM_PTYPE_MK` |
 | CDS – projection | `ZC_PRM_PROMO_MK`, `ZC_PRM_PITEM_MK` + metadata extensions |
-| CDS – API | `ZI_PRM_POS_PRICE_MK` |
+| CDS – API | `ZI_PRM_POS_PRICE_MK`, `ZI_PRM_POS_KEYDATE_MK` (with parameter `P_KeyDate`, data element `ZPRM_KEYDATE_MK`) |
+| CDS – analytics | `ZI_PRM_PROMO_KPI_MK` (aggregation) + access control `ZI_PRM_PROMO_KPI_MK` (DCL) |
+| AMDP | Table function `ZI_PRM_PROMO_PROFIT_TF`, AMDP class `ZCL_PRM_PROFIT_AMDP_MK` |
+| ABAP Objects | `ZIF_PRM_PRICE_STRATEGY_MK`, `ZCL_PRM_STRATEGY_PCT_MK`, `ZCL_PRM_STRATEGY_FIX_MK`, `ZCL_PRM_STRATEGY_BXGY_MK`, `ZCL_PRM_STRATEGY_FACTORY_MK`, `ZCL_PRM_PROFIT_CALC_MK` |
+| Test classes | `ZTC_PRM_POS_KEYDATE_MK` (CDS test double), `ZTC_PRM_PROFIT_CALC_MK` (OO logic) |
 | Behavior | `ZR_PRM_PROMO_MK` (managed, draft, strict 2), `ZC_PRM_PROMO_MK` (projection) |
 | Behavior pool | `ZBP_R_PRM_PROMO_MK` – determinations, validations, actions, feature control, unit tests |
 | Services | `ZUI_PRM_PROMO_MK` / `ZUI_PRM_PROMO_O4_MK` (UI), `ZAPI_PRM_POS_MK` / `ZAPI_PRM_POS_O4_MK` (Web API) |
-| Utilities | `ZCL_PRM_DATA_GEN_MK` (demo data), `ZCL_PRM_CUST_GEN_MK` (status/type texts) |
+| Utilities | `ZCL_PRM_DATA_GEN_MK` (demo data), `ZCL_PRM_CUST_GEN_MK` (status/type texts), `ZCL_PRM_COST_GEN_MK` (product cost prices) |
 
 ### RAP features used
 
 `managed` implementation · `with draft` · `strict ( 2 )` · managed UUID numbering · determinations on modify / on save · validations with `%state_area` and `%path` messages · instance actions with result · instance feature control · global authorization · total ETag / ETag master · side effects · value helps and text associations · criticality · OData V4 UI and Web API bindings
+
+---
+
+## Profitability Analysis — AMDP vs. ABAP Objects
+
+Each promotion item gets an **effective price**, a **unit margin** and a status. The same rule is implemented twice, in two technologies, and the results are compared row by row.
+
+| Promotion type | Effective price |
+|---|---|
+| **P** – percent discount | regular × (100 − discount) / 100 |
+| **F** – fixed price | promotion price as stored |
+| **B** – buy 3 pay 2 | regular × 2 / 3 |
+
+Unit margin = effective price − cost · Margin % = margin / effective price × 100 · Status: **LOSS** (margin < 0), **LOW** (< 10 %), **OK**.
+
+### 1. In HANA — CDS table function + AMDP
+
+`ZI_PRM_PROMO_PROFIT_TF` is read like any CDS view; its rows are produced by `ZCL_PRM_PROFIT_AMDP_MK=>GET_PROFITABILITY`, written in **SQLScript** and executed in the database (client handling via `SESSION_CONTEXT('CDS_CLIENT')`).
+
+### 2. In ABAP — Strategy pattern
+
+```mermaid
+classDiagram
+    class ZIF_PRM_PRICE_STRATEGY_MK {
+        <<interface>>
+        +get_effective_price(item) amount
+        +get_description() string
+    }
+    ZIF_PRM_PRICE_STRATEGY_MK <|.. ZCL_PRM_STRATEGY_PCT_MK : P
+    ZIF_PRM_PRICE_STRATEGY_MK <|.. ZCL_PRM_STRATEGY_FIX_MK : F
+    ZIF_PRM_PRICE_STRATEGY_MK <|.. ZCL_PRM_STRATEGY_BXGY_MK : B (constructor X, Y)
+    ZCL_PRM_STRATEGY_FACTORY_MK ..> ZIF_PRM_PRICE_STRATEGY_MK : creates
+    ZCL_PRM_PROFIT_CALC_MK ..> ZCL_PRM_STRATEGY_FACTORY_MK : uses
+    ZBP_R_PRM_PROMO_MK ..> ZCL_PRM_STRATEGY_FACTORY_MK : calculatePromoPrice
+```
+
+- A new promotion type needs **one new class and one line in the factory** — existing code stays unchanged (open/closed principle).
+- The **RAP determination** `calculatePromoPrice` uses the same factory, so the pricing rule lives in one place.
+- `calculate_item` has no database access, which makes it testable without doubles.
+- Modern ABAP used throughout: `NEW`, `SWITCH`, `COND`, `REDUCE`, `FOR`, `CORRESPONDING … BASE`, `VALUE … OPTIONAL`, `xsdbool`, `IS INSTANCE OF`, string templates.
+
+### Cross-check result
+
+Running `ZCL_PRM_PROFIT_CALC_MK` (F9) compares both engines:
+
+```
+Kampanya   Ürün   Tip  Strateji          Etkin   Marj    Marj%  Durum  AMDP
+PR00000001 P0003  P    Yüzde indirim      119.92   -7.50   -6.25  LOSS  AYNI
+PR00000006 P0009  B    3 al 2 öde          36.60    3.66   10.00  OK    AYNI
+PR00000008 P0002  B    3 al 2 öde          66.60   11.65   17.49  OK    AYNI
+...
+Toplam 11 kalem, 11 tanesi AMDP ile AYNI. Zararına satış: 2
+```
+
+### Findings
+
+- **Bug found and fixed:** the RAP app calculated every promotion type as a percent discount, so a *buy 3 pay 2* item showed 46.67 instead of 36.60. Fixed by routing the determination through the strategy factory.
+- **Data quality:** the stored promotion prices of one demo promotion were 1.00 too low; both engines recalculate from the rule and return the correct values.
 
 ---
 
@@ -112,7 +177,14 @@ Business logic is covered by **ABAP Unit** tests in the behavior pool (`ZBP_R_PR
 | `approve_without_items_fails` | A promotion without items cannot be approved |
 | `overlap_is_detected` | Overlapping promotions for the same product are detected |
 
-Static code quality is checked with **ABAP Test Cockpit (ATC)**: no errors or warnings in the business object.
+Additional test classes:
+
+| Class | Technique | Tests |
+|---|---|---|
+| `ZTC_PRM_POS_KEYDATE_MK` | `cl_cds_test_environment` (CDS test double) | only published promotions; days-left, urgency (CASE) and saving; empty result outside validity |
+| `ZTC_PRM_PROFIT_CALC_MK` | pure OO logic, no database | each strategy, factory (`IS INSTANCE OF`), LOSS, boundary 10.00 % = OK, below 10 % = LOW, zero price |
+
+Static code quality is checked with **ABAP Test Cockpit (ATC)**: no errors; the only warnings are deliberate full-table reads in the demo-data generators. Unnecessary full reads were replaced with `FOR ALL ENTRIES` (with an empty-table guard).
 
 ---
 
@@ -175,7 +247,7 @@ Requirements: SAP BTP ABAP Environment (trial or licensed), Eclipse with ABAP De
 - Message class for translatable messages
 - Number range object instead of `MAX()` for promotion IDs
 - RAP business events on publish for push-based POS integration
-- Buy-X-pay-Y and fixed-price promotion logic
+- Editable fixed price for type F and recalculation of items when the promotion type changes
 - Instance authorization based on store / category
 
 ---
